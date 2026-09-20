@@ -1,6 +1,6 @@
-# Cognito-only — deploys in ~1 minute (no Lambda packaging)
+# Cognito-only — deploys in ~1 minute (no Lambda packaging of full API)
 AWSTemplateFormatVersion: "2010-09-09"
-Description: LimitX Cognito User Pool + Hosted UI (fast)
+Description: LimitX Cognito User Pool + Hosted UI + auto-confirm for email signup
 
 Parameters:
   Environment:
@@ -14,6 +14,43 @@ Parameters:
     Default: https://main.d3ossfbvxnc0f7.amplifyapp.com/login/cognito
 
 Resources:
+  PreSignUpAutoConfirm:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub limitx-cognito-presignup-${Environment}
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt PreSignUpRole.Arn
+      Timeout: 5
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            event.response.autoConfirmUser = true;
+            event.response.autoVerifyEmail = true;
+            return event;
+          };
+
+  PreSignUpRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PreSignUpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PreSignUpAutoConfirm
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt LimitXUserPool.Arn
+
   LimitXUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -22,6 +59,8 @@ Resources:
       AutoVerifiedAttributes: [email]
       UsernameConfiguration:
         CaseSensitive: false
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpAutoConfirm.Arn
       Policies:
         PasswordPolicy:
           MinimumLength: 8

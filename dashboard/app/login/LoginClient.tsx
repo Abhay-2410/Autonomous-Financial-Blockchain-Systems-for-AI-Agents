@@ -1,90 +1,100 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import {
-  buildAuthorizeUrl,
-  createPkcePair,
-  fetchCognitoConfig,
-  type CognitoConfig,
-} from "../../lib/cognito";
 
-type Step = "phone" | "code";
-
-const VERIFIER_KEY = "limitx_cognito_verifier";
-const STATE_KEY = "limitx_cognito_state";
-const NEXT_KEY = "limitx_cognito_next";
+type Mode = "signin" | "signup" | "confirm" | "phone" | "phone-code";
 
 export default function LoginClient() {
   const search = useSearchParams();
   const nextPath = search.get("next") || "/";
 
-  const [step, setStep] = useState<Step>("phone");
+  const [mode, setMode] = useState<Mode>("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [verifyCode, setVerifyCode] = useState("");
+
   const [countryCode, setCountryCode] = useState("91");
   const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
+  const [smsCode, setSmsCode] = useState("");
   const [phoneMasked, setPhoneMasked] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
   const [isNew, setIsNew] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [cognitoBusy, setCognitoBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cognito, setCognito] = useState<CognitoConfig | null>(null);
-  const [showPhone, setShowPhone] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchCognitoConfig().then((cfg) => {
-      if (!cancelled) setCognito(cfg);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const fullPhonePreview = useMemo(() => {
     const digits = phone.replace(/\D/g, "");
     return digits ? `+${countryCode}${digits}` : `+${countryCode}…`;
   }, [countryCode, phone]);
 
-  async function onCognito() {
+  async function finishOk() {
+    window.location.href = nextPath.startsWith("/") ? nextPath : "/";
+  }
+
+  async function onEmailAuth(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
     setError(null);
-    setCognitoBusy(true);
+    setInfo(null);
     try {
-      const cfg = cognito ?? (await fetchCognitoConfig());
-      if (!cfg?.enabled || !cfg.hostedUiBase || !cfg.clientId) {
-        throw new Error(
-          "Cognito is not ready yet. Check NEXT_PUBLIC_COGNITO_* in .env.local (see docs/AUTH_COGNITO.md)."
-        );
+      if (mode === "signup" && password !== confirmPassword) {
+        throw new Error("Passwords do not match.");
       }
-      const { verifier, challenge } = await createPkcePair();
-      const state = btoa(
-        String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16)))
-      )
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
-      sessionStorage.setItem(VERIFIER_KEY, verifier);
-      sessionStorage.setItem(STATE_KEY, state);
-      sessionStorage.setItem(NEXT_KEY, nextPath);
-      sessionStorage.removeItem("limitx_cognito_exchange_lock");
-      const redirectUri = `${window.location.origin}/login/cognito`;
-      const url = buildAuthorizeUrl({
-        hostedUiBase: cfg.hostedUiBase,
-        clientId: cfg.clientId,
-        redirectUri,
-        state,
-        codeChallenge: challenge,
-        scopes: cfg.scopes,
+      const action =
+        mode === "confirm" ? "confirm" : mode === "signup" ? "signup" : "signin";
+      const res = await fetch("/api/auth/cognito/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          email,
+          password,
+          code: verifyCode,
+        }),
       });
-      window.location.href = url;
+      const data = (await res.json()) as {
+        message?: string;
+        needsConfirmation?: boolean;
+        signedIn?: boolean;
+        confirmed?: boolean;
+      };
+      if (!res.ok) {
+        if (data.needsConfirmation) {
+          setMode("confirm");
+          setInfo(data.message ?? "Enter the verification code from your email.");
+          setError(null);
+          return;
+        }
+        throw new Error(data.message ?? "Authentication failed");
+      }
+      if (data.needsConfirmation) {
+        setMode("confirm");
+        setInfo(data.message ?? "Check your email for a verification code.");
+        return;
+      }
+      if (data.signedIn) {
+        await finishOk();
+        return;
+      }
+      if (data.confirmed) {
+        setMode("signin");
+        setInfo("Email verified. Sign in with your password.");
+        setVerifyCode("");
+        return;
+      }
+      throw new Error(data.message ?? "Unexpected response");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start Cognito");
-      setCognitoBusy(false);
+      setError(err instanceof Error ? err.message : "Authentication failed");
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function onSendCode(e: FormEvent) {
+  async function onSendSms(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -101,13 +111,11 @@ export default function LoginClient() {
         isNew?: boolean;
         devCode?: string;
       };
-      if (!res.ok) {
-        throw new Error(data.message ?? "Could not send code");
-      }
+      if (!res.ok) throw new Error(data.message ?? "Could not send code");
       setPhoneMasked(data.phoneMasked ?? fullPhonePreview);
       setIsNew(Boolean(data.isNew));
       setDevCode(data.devCode ?? null);
-      setStep("code");
+      setMode("phone-code");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send code");
     } finally {
@@ -115,7 +123,7 @@ export default function LoginClient() {
     }
   }
 
-  async function onVerify(e: FormEvent) {
+  async function onVerifySms(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -123,19 +131,19 @@ export default function LoginClient() {
       const res = await fetch("/api/auth/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phone, countryCode, code }),
+        body: JSON.stringify({ phone, countryCode, code: smsCode }),
       });
       const data = (await res.json()) as { message?: string };
-      if (!res.ok) {
-        throw new Error(data.message ?? "Incorrect code");
-      }
-      window.location.href = nextPath;
+      if (!res.ok) throw new Error(data.message ?? "Incorrect code");
+      await finishOk();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Incorrect code");
     } finally {
       setBusy(false);
     }
   }
+
+  const emailModes = mode === "signin" || mode === "signup" || mode === "confirm";
 
   return (
     <div className="mx-auto flex min-h-[72vh] max-w-md flex-col justify-center">
@@ -148,37 +156,183 @@ export default function LoginClient() {
         </p>
       </div>
 
-      <div className="card space-y-6 p-6 sm:p-8">
-        {!showPhone && step === "phone" ? (
+      <div className="card space-y-5 p-6 sm:p-8">
+        {emailModes && (
           <>
             <div>
               <h1 className="font-display text-2xl font-semibold text-[#14201a]">
-                Sign in
+                {mode === "signup"
+                  ? "Create account"
+                  : mode === "confirm"
+                    ? "Verify email"
+                    : "Sign in"}
               </h1>
               <p className="mt-1.5 text-sm leading-relaxed text-[#5c6b63]">
-                Create an account or sign in with email via Amazon Cognito.
-                Anyone can join.
+                {mode === "signup"
+                  ? "Anyone can join with email and password (Amazon Cognito)."
+                  : mode === "confirm"
+                    ? `Enter the code sent to ${email || "your email"}.`
+                    : "Sign in with your email and password."}
               </p>
             </div>
 
-            {error && (
-              <p className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
-                {error}
-              </p>
+            {mode !== "confirm" && (
+              <div className="flex rounded-xl border border-[#d5ddd8] p-1">
+                <button
+                  type="button"
+                  className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${
+                    mode === "signin"
+                      ? "bg-[#e6f5ef] text-[#0d7a5f]"
+                      : "text-[#5c6b63] hover:text-[#14201a]"
+                  }`}
+                  onClick={() => {
+                    setMode("signin");
+                    setError(null);
+                    setInfo(null);
+                  }}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${
+                    mode === "signup"
+                      ? "bg-[#e6f5ef] text-[#0d7a5f]"
+                      : "text-[#5c6b63] hover:text-[#14201a]"
+                  }`}
+                  onClick={() => {
+                    setMode("signup");
+                    setError(null);
+                    setInfo(null);
+                  }}
+                >
+                  Create account
+                </button>
+              </div>
             )}
 
-            <button
-              type="button"
-              className="btn-primary w-full py-3 text-base"
-              disabled={cognitoBusy}
-              onClick={onCognito}
-            >
-              {cognitoBusy ? "Opening Cognito…" : "Continue with Amazon Cognito"}
-            </button>
+            <form onSubmit={onEmailAuth} className="space-y-4">
+              <div>
+                <label className="label" htmlFor="email">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  className="field"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  disabled={mode === "confirm"}
+                />
+              </div>
 
-            <p className="text-center text-xs text-[#8a968e]">
-              You’ll use the Cognito Hosted UI to sign up or sign in.
-            </p>
+              {mode !== "confirm" && (
+                <div>
+                  <label className="label" htmlFor="password">
+                    Password
+                  </label>
+                  <input
+                    id="password"
+                    className="field"
+                    type="password"
+                    autoComplete={
+                      mode === "signup" ? "new-password" : "current-password"
+                    }
+                    placeholder={
+                      mode === "signup" ? "Min 8 chars, letter + number" : "••••••••"
+                    }
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+              )}
+
+              {mode === "signup" && (
+                <div>
+                  <label className="label" htmlFor="confirmPassword">
+                    Confirm password
+                  </label>
+                  <input
+                    id="confirmPassword"
+                    className="field"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Repeat password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+              )}
+
+              {mode === "confirm" && (
+                <>
+                  <div>
+                    <label className="label" htmlFor="verifyCode">
+                      Verification code
+                    </label>
+                    <input
+                      id="verifyCode"
+                      className="field font-mono tracking-widest"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="123456"
+                      value={verifyCode}
+                      onChange={(e) =>
+                        setVerifyCode(e.target.value.replace(/\s/g, ""))
+                      }
+                      required
+                    />
+                  </div>
+                  <input type="hidden" value={password} readOnly />
+                </>
+              )}
+
+              {info && (
+                <p className="rounded-xl bg-[#e6f5ef] px-3.5 py-2.5 text-sm text-[#0d7a5f]">
+                  {info}
+                </p>
+              )}
+              {error && (
+                <p className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
+                  {error}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                className="btn-primary w-full py-3 text-base"
+                disabled={busy}
+              >
+                {busy
+                  ? "Please wait…"
+                  : mode === "signup"
+                    ? "Create account"
+                    : mode === "confirm"
+                      ? "Verify & sign in"
+                      : "Sign in"}
+              </button>
+            </form>
+
+            {mode === "confirm" && (
+              <button
+                type="button"
+                className="btn-secondary w-full"
+                onClick={() => {
+                  setMode("signin");
+                  setError(null);
+                  setInfo(null);
+                }}
+              >
+                Back to sign in
+              </button>
+            )}
 
             <div className="relative py-1">
               <div className="absolute inset-0 flex items-center">
@@ -193,15 +347,18 @@ export default function LoginClient() {
               type="button"
               className="btn-secondary w-full"
               onClick={() => {
-                setShowPhone(true);
+                setMode("phone");
                 setError(null);
+                setInfo(null);
               }}
             >
               Use phone OTP instead
             </button>
           </>
-        ) : step === "phone" ? (
-          <form onSubmit={onSendCode} className="space-y-5">
+        )}
+
+        {mode === "phone" && (
+          <form onSubmit={onSendSms} className="space-y-5">
             <div>
               <h1 className="font-display text-2xl font-semibold text-[#14201a]">
                 Your number
@@ -210,7 +367,6 @@ export default function LoginClient() {
                 We’ll text a one-time code. No password.
               </p>
             </div>
-
             <div>
               <label className="label" htmlFor="phone">
                 Phone number
@@ -244,30 +400,26 @@ export default function LoginClient() {
               </div>
               <p className="mt-1.5 text-xs text-[#8a968e]">{fullPhonePreview}</p>
             </div>
-
             {error && (
               <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {error}
               </p>
             )}
-
             <button type="submit" className="btn-primary w-full" disabled={busy}>
               {busy ? "Sending…" : "Continue"}
             </button>
-
             <button
               type="button"
               className="btn-secondary w-full"
-              onClick={() => {
-                setShowPhone(false);
-                setError(null);
-              }}
+              onClick={() => setMode("signin")}
             >
-              Back to Cognito
+              Back to email sign in
             </button>
           </form>
-        ) : (
-          <form onSubmit={onVerify} className="space-y-5">
+        )}
+
+        {mode === "phone-code" && (
+          <form onSubmit={onVerifySms} className="space-y-5">
             <div>
               <h1 className="font-display text-2xl font-semibold text-[#14201a]">
                 Enter code
@@ -277,7 +429,6 @@ export default function LoginClient() {
                 {isNew ? " · creating your account" : ""}
               </p>
             </div>
-
             {devCode && (
               <div className="rounded-xl border border-[#c5e4d8] bg-[#e6f5ef] px-3.5 py-3 text-sm text-[#0d7a5f]">
                 Demo mode — your code is{" "}
@@ -286,50 +437,40 @@ export default function LoginClient() {
                 </span>
               </div>
             )}
-
             <div>
-              <label className="label" htmlFor="code">
+              <label className="label" htmlFor="smsCode">
                 6-digit code
               </label>
               <input
-                id="code"
+                id="smsCode"
                 className="field font-mono text-center text-xl tracking-[0.35em]"
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 maxLength={6}
                 placeholder="••••••"
-                value={code}
+                value={smsCode}
                 onChange={(e) =>
-                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  setSmsCode(e.target.value.replace(/\D/g, "").slice(0, 6))
                 }
                 required
               />
             </div>
-
             {error && (
               <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {error}
               </p>
             )}
-
             <button
               type="submit"
               className="btn-primary w-full"
-              disabled={busy || code.length < 4}
+              disabled={busy || smsCode.length < 4}
             >
               {busy ? "Checking…" : "Sign in"}
             </button>
-
             <button
               type="button"
               className="btn-secondary w-full"
-              disabled={busy}
-              onClick={() => {
-                setStep("phone");
-                setCode("");
-                setError(null);
-                setDevCode(null);
-              }}
+              onClick={() => setMode("phone")}
             >
               Use a different number
             </button>
