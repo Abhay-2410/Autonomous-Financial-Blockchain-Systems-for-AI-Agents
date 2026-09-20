@@ -54,7 +54,7 @@ export default function LoginClient() {
       const cfg = cognito ?? (await fetchCognitoConfig());
       if (!cfg?.enabled || !cfg.hostedUiBase || !cfg.clientId) {
         throw new Error(
-          "Cognito is not ready yet. Deploy the API stack, then set Cognito env vars on Amplify (see docs/AUTH_COGNITO.md)."
+          "Cognito is not ready yet. Check NEXT_PUBLIC_COGNITO_* in .env.local (see docs/AUTH_COGNITO.md)."
         );
       }
       const { verifier, challenge } = await createPkcePair();
@@ -137,47 +137,56 @@ export default function LoginClient() {
   }
 
   return (
-    <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-1">
+    <div className="mx-auto flex min-h-[72vh] max-w-md flex-col justify-center">
       <div className="mb-8 text-center">
-        <div className="font-display text-4xl font-bold tracking-tight text-[#14201a]">
+        <p className="font-display text-4xl font-bold tracking-tight text-[#14201a] sm:text-5xl">
           LimitX
-        </div>
+        </p>
         <p className="mt-2 text-sm text-[#5c6b63]">
-          Sign in with email (Amazon Cognito) — anyone can create an account.
+          Pay with AI agents — safely
         </p>
       </div>
 
-      <div className="card p-6 sm:p-8">
+      <div className="card space-y-6 p-6 sm:p-8">
         {!showPhone && step === "phone" ? (
-          <div className="space-y-5">
+          <>
             <div>
               <h1 className="font-display text-2xl font-semibold text-[#14201a]">
                 Sign in
               </h1>
-              <p className="mt-1 text-sm text-[#5c6b63]">
-                Use Amazon Cognito with your email. Phone OTP still works if you
-                need it.
+              <p className="mt-1.5 text-sm leading-relaxed text-[#5c6b63]">
+                Create an account or sign in with email via Amazon Cognito.
+                Anyone can join.
               </p>
             </div>
 
             {error && (
-              <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <p className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
                 {error}
               </p>
             )}
 
             <button
               type="button"
-              className="btn-primary w-full"
+              className="btn-primary w-full py-3 text-base"
               disabled={cognitoBusy}
               onClick={onCognito}
             >
-              {cognitoBusy
-                ? "Opening Cognito…"
-                : cognito?.enabled === false
-                  ? "Cognito unavailable"
-                  : "Continue with Amazon Cognito"}
+              {cognitoBusy ? "Opening Cognito…" : "Continue with Amazon Cognito"}
             </button>
+
+            <p className="text-center text-xs text-[#8a968e]">
+              You’ll use the Cognito Hosted UI to sign up or sign in.
+            </p>
+
+            <div className="relative py-1">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#d5ddd8]" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-white px-3 text-[#8a968e]">or</span>
+              </div>
+            </div>
 
             <button
               type="button"
@@ -189,7 +198,7 @@ export default function LoginClient() {
             >
               Use phone OTP instead
             </button>
-          </div>
+          </>
         ) : step === "phone" ? (
           <form onSubmit={onSendCode} className="space-y-5">
             <div>
@@ -197,7 +206,7 @@ export default function LoginClient() {
                 Your number
               </h1>
               <p className="mt-1 text-sm text-[#5c6b63]">
-                We&apos;ll text a one-time code to your phone. No password.
+                We’ll text a one-time code. No password.
               </p>
             </div>
 

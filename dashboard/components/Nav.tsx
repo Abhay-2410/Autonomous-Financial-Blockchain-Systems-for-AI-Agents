@@ -18,7 +18,7 @@ export function Nav() {
   const [phone, setPhone] = useState<string | null>(null);
 
   useEffect(() => {
-    if (pathname === "/login") return;
+    if (pathname === "/login" || pathname.startsWith("/login/")) return;
     fetch("/api/auth/me")
       .then(async (r) => {
         if (!r.ok) return null;
@@ -28,7 +28,7 @@ export function Nav() {
       .catch(() => setPhone(null));
   }, [pathname]);
 
-  if (pathname === "/login") return null;
+  if (pathname === "/login" || pathname.startsWith("/login/")) return null;
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
