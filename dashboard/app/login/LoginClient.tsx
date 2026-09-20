@@ -1,9 +1,19 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import {
+  buildAuthorizeUrl,
+  createPkcePair,
+  fetchCognitoConfig,
+  type CognitoConfig,
+} from "../../lib/cognito";
 
 type Step = "phone" | "code";
+
+const VERIFIER_KEY = "limitx_cognito_verifier";
+const STATE_KEY = "limitx_cognito_state";
+const NEXT_KEY = "limitx_cognito_next";
 
 export default function LoginClient() {
   const search = useSearchParams();
@@ -17,12 +27,61 @@ export default function LoginClient() {
   const [devCode, setDevCode] = useState<string | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [cognitoBusy, setCognitoBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cognito, setCognito] = useState<CognitoConfig | null>(null);
+  const [showPhone, setShowPhone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCognitoConfig().then((cfg) => {
+      if (!cancelled) setCognito(cfg);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fullPhonePreview = useMemo(() => {
     const digits = phone.replace(/\D/g, "");
     return digits ? `+${countryCode}${digits}` : `+${countryCode}…`;
   }, [countryCode, phone]);
+
+  async function onCognito() {
+    setError(null);
+    setCognitoBusy(true);
+    try {
+      const cfg = cognito ?? (await fetchCognitoConfig());
+      if (!cfg?.enabled || !cfg.hostedUiBase || !cfg.clientId) {
+        throw new Error(
+          "Cognito is not ready yet. Deploy the API stack, then set Cognito env vars on Amplify (see docs/AUTH_COGNITO.md)."
+        );
+      }
+      const { verifier, challenge } = await createPkcePair();
+      const state = btoa(
+        String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16)))
+      )
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+      sessionStorage.setItem(VERIFIER_KEY, verifier);
+      sessionStorage.setItem(STATE_KEY, state);
+      sessionStorage.setItem(NEXT_KEY, nextPath);
+      const redirectUri = `${window.location.origin}/login/cognito`;
+      const url = buildAuthorizeUrl({
+        hostedUiBase: cfg.hostedUiBase,
+        clientId: cfg.clientId,
+        redirectUri,
+        state,
+        codeChallenge: challenge,
+        scopes: cfg.scopes,
+      });
+      window.location.href = url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start Cognito");
+      setCognitoBusy(false);
+    }
+  }
 
   async function onSendCode(e: FormEvent) {
     e.preventDefault();
@@ -84,12 +143,54 @@ export default function LoginClient() {
           LimitX
         </div>
         <p className="mt-2 text-sm text-[#5c6b63]">
-          Sign in with your phone — like a real payments app.
+          Sign in with email (Amazon Cognito) — anyone can create an account.
         </p>
       </div>
 
       <div className="card p-6 sm:p-8">
-        {step === "phone" ? (
+        {!showPhone && step === "phone" ? (
+          <div className="space-y-5">
+            <div>
+              <h1 className="font-display text-2xl font-semibold text-[#14201a]">
+                Sign in
+              </h1>
+              <p className="mt-1 text-sm text-[#5c6b63]">
+                Use Amazon Cognito with your email. Phone OTP still works if you
+                need it.
+              </p>
+            </div>
+
+            {error && (
+              <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {error}
+              </p>
+            )}
+
+            <button
+              type="button"
+              className="btn-primary w-full"
+              disabled={cognitoBusy}
+              onClick={onCognito}
+            >
+              {cognitoBusy
+                ? "Opening Cognito…"
+                : cognito?.enabled === false
+                  ? "Cognito unavailable"
+                  : "Continue with Amazon Cognito"}
+            </button>
+
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              onClick={() => {
+                setShowPhone(true);
+                setError(null);
+              }}
+            >
+              Use phone OTP instead
+            </button>
+          </div>
+        ) : step === "phone" ? (
           <form onSubmit={onSendCode} className="space-y-5">
             <div>
               <h1 className="font-display text-2xl font-semibold text-[#14201a]">
@@ -142,6 +243,17 @@ export default function LoginClient() {
 
             <button type="submit" className="btn-primary w-full" disabled={busy}>
               {busy ? "Sending…" : "Continue"}
+            </button>
+
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              onClick={() => {
+                setShowPhone(false);
+                setError(null);
+              }}
+            >
+              Back to Cognito
             </button>
           </form>
         ) : (

@@ -168,6 +168,7 @@ Conditions:
 
 Resources:
   # --- API Gateway ---
+  # Cognito lives in infra/cognito-fast.yaml (stack: limitx-cognito-dev) — deploy that separately.
   AgentWalletApi:
     Type: AWS::Serverless::Api
     Properties:

@@ -13,7 +13,7 @@ Each agent gets a prepaid card (demo address on Base Sepolia). Every payment is
 policy-checked (allow / human approval / deny), then KMS-signed. Settlement is
 either a **Base stub** or a **Prava** hosted passkey card checkout.
 
-→ Full walkthrough: **[HOW_IT_WORKS.md](./HOW_IT_WORKS.md)**
+→ Full walkthrough: **[HOW_IT_WORKS.md](./HOW_IT_WORKS.md)** · Cognito login: **[docs/AUTH_COGNITO.md](./docs/AUTH_COGNITO.md)**
 
 ```
 agent-wallet/

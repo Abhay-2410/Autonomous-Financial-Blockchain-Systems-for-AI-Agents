@@ -11,6 +11,7 @@
  *   AuditEvent    PK=AGENT#<agentId>     SK=AUDIT#<timestamp>
  *   User          PK=USER#<userId>       SK=META
  *   PhoneIndex    PK=PHONE#<e164>        SK=USER
+ *   CognitoIndex  PK=COGNITO#<sub>       SK=USER
  *   PhoneOtp      PK=OTP#<e164>          SK=CODE   (TTL via expiresAt)
  */
 
@@ -32,6 +33,7 @@ export type EntityType =
   | "AuditEvent"
   | "User"
   | "PhoneIndex"
+  | "CognitoIndex"
   | "PhoneOtp";
 
 /** Base item shape stored in DynamoDB. */
@@ -142,11 +144,15 @@ export interface AuditEvent extends DynamoKeys {
   details: Record<string, unknown>;
 }
 
-/** Phone-authenticated LimitX account (payments-app style). */
+/** Phone- or Cognito-authenticated LimitX account (payments-app style). */
 export interface User extends DynamoKeys {
   entityType: "User";
   userId: string;
-  phone: string; // E.164
+  /** E.164 for phone auth, or `cognito:<sub>` for Cognito-only accounts. */
+  phone: string;
+  email?: string;
+  cognitoSub?: string;
+  authProvider?: "phone" | "cognito";
   walletId: string;
   displayName?: string;
   createdAt: string;
@@ -157,6 +163,13 @@ export interface User extends DynamoKeys {
 export interface PhoneIndex extends DynamoKeys {
   entityType: "PhoneIndex";
   phone: string;
+  userId: string;
+}
+
+/** Reverse lookup Cognito sub → userId. */
+export interface CognitoIndex extends DynamoKeys {
+  entityType: "CognitoIndex";
+  cognitoSub: string;
   userId: string;
 }
 
@@ -179,6 +192,7 @@ export type AgentWalletItem =
   | AuditEvent
   | User
   | PhoneIndex
+  | CognitoIndex
   | PhoneOtp;
 
 // --- Key builders ---
@@ -220,6 +234,11 @@ export const Keys = {
 
   phoneIndex: (phoneE164: string): DynamoKeys => ({
     pk: `PHONE#${phoneE164}`,
+    sk: "USER",
+  }),
+
+  cognitoIndex: (cognitoSub: string): DynamoKeys => ({
+    pk: `COGNITO#${cognitoSub}`,
     sk: "USER",
   }),
 
@@ -305,6 +324,16 @@ export function buildPhoneIndex(
   return {
     ...Keys.phoneIndex(input.phone),
     entityType: "PhoneIndex",
+    ...input,
+  };
+}
+
+export function buildCognitoIndex(
+  input: Omit<CognitoIndex, "pk" | "sk" | "entityType">
+): CognitoIndex {
+  return {
+    ...Keys.cognitoIndex(input.cognitoSub),
+    entityType: "CognitoIndex",
     ...input,
   };
 }

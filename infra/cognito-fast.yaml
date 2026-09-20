@@ -1,0 +1,82 @@
+# Cognito-only — deploys in ~1 minute (no Lambda packaging)
+AWSTemplateFormatVersion: "2010-09-09"
+Description: LimitX Cognito User Pool + Hosted UI (fast)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  CognitoCallbackUrlLocal:
+    Type: String
+    Default: http://localhost:3000/login/cognito
+  CognitoCallbackUrlPublic:
+    Type: String
+    Default: https://main.d3ossfbvxnc0f7.amplifyapp.com/login/cognito
+
+Resources:
+  LimitXUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub limitx-users-${Environment}
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: false
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+
+  LimitXUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub limitx-dashboard-${Environment}
+      UserPoolId: !Ref LimitXUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+      SupportedIdentityProviders: [COGNITO]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs:
+        - !Ref CognitoCallbackUrlLocal
+        - !Ref CognitoCallbackUrlPublic
+      LogoutURLs:
+        - http://localhost:3000/login
+        - https://main.d3ossfbvxnc0f7.amplifyapp.com/login
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  LimitXUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub limitx-${Environment}-${AWS::AccountId}
+      UserPoolId: !Ref LimitXUserPool
+
+Outputs:
+  CognitoUserPoolId:
+    Value: !Ref LimitXUserPool
+  CognitoClientId:
+    Value: !Ref LimitXUserPoolClient
+  CognitoDomain:
+    Value: !Ref LimitXUserPoolDomain
+  CognitoHostedUiBase:
+    Value: !Sub https://${LimitXUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+  CognitoRegion:
+    Value: !Ref AWS::Region

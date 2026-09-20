@@ -36,9 +36,10 @@ three rails — **Stellar Testnet XLM**, **Base Sepolia stub**, or **Prava card 
 | Piece | Role |
 |---|---|
 | **Dashboard** (`dashboard/`) | Owner UI: Home, Pay, Agents, Approvals, Activity |
-| **API** (`api/`) | SAM Lambdas: authorize, request txn, sign, Prava, approvals |
+| **API** (`api/`) | SAM Lambdas: authorize, request txn, sign, Prava, approvals, Cognito exchange |
+| **Auth** | **Amazon Cognito** (email, public signup) primary; phone OTP still available — see [docs/AUTH_COGNITO.md](./docs/AUTH_COGNITO.md) |
 | **Agents** (`agents/`) | Shopping/travel bots: discover → LimitX gate → optional Prava |
-| **Infra** (`infra/`) | DynamoDB, KMS secp256k1, Step Functions, optional Nitro |
+| **Infra** (`infra/`) | DynamoDB, Cognito, KMS secp256k1, Step Functions, optional Nitro |
 | **Nitro** (`infra/nitro-enclave/`) | Optional Free-Tier-skipped enclave signer + PCR0 key policy |
 | **Prava** | Card sessions + Agentic Commerce (UCP + Browser Harness) |
 

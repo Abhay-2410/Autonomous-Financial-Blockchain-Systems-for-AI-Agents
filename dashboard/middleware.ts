@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC = ["/login", "/api/auth/start", "/api/auth/verify"];
+const PUBLIC = [
+  "/login",
+  "/api/auth/start",
+  "/api/auth/verify",
+  "/api/auth/cognito",
+];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -18,12 +23,17 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Cognito OAuth callback page (under /login/cognito)
+  if (pathname.startsWith("/login/")) {
+    return NextResponse.next();
+  }
+
   // Prava return can complete without session briefly — still require login.
   const token = req.cookies.get("limitx_session")?.value;
   if (!token) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
-        { message: "Sign in with your phone number." },
+        { message: "Sign in to continue." },
         { status: 401 }
       );
     }

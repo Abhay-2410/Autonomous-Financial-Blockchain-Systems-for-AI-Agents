@@ -35,3 +35,8 @@ applications:
         NEXT_TELEMETRY_DISABLED: "1"
         # Override in Amplify Console → Environment variables if the API URL changes
         NEXT_PUBLIC_API_URL: https://gaq4ipibk8.execute-api.eu-north-1.amazonaws.com/dev
+        NEXT_PUBLIC_COGNITO_USER_POOL_ID: eu-north-1_0IJdwsjhj
+        NEXT_PUBLIC_COGNITO_CLIENT_ID: 75qh4sjcosfd46l53adrlojlee
+        NEXT_PUBLIC_COGNITO_DOMAIN: limitx-dev-609394380753
+        NEXT_PUBLIC_COGNITO_REGION: eu-north-1
+        NEXT_PUBLIC_COGNITO_REDIRECT_URI: https://main.d3ossfbvxnc0f7.amplifyapp.com/login/cognito
