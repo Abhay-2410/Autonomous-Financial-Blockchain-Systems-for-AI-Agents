@@ -18,12 +18,12 @@ export function SpendBar({
         <p className="text-sm text-[#5c6b63]">
           Spent today{" "}
           <span className="font-semibold text-[#14201a]">
-            ${spent.toLocaleString()}
+            {formatUsd(spent)}
           </span>
-          <span className="text-[#8a968e]"> of ${limit.toLocaleString()}</span>
+          <span className="text-[#8a968e]"> of {formatUsd(limit)}</span>
         </p>
         <p className="text-sm font-semibold text-[#0d7a5f]">
-          ${remaining.toLocaleString()} left
+          {formatUsd(remaining)} left
         </p>
       </div>
       <div className="h-2.5 overflow-hidden rounded-full bg-[#e8eee9]">
@@ -142,4 +142,12 @@ export function formatWhen(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+/**
+ * Format a USD-equivalent policy amount (same unit everywhere: Pay, limits,
+ * Approvals, Activity). Never treat as XLM/stroops.
+ */
+export function formatUsd(amount: number): string {
+  return `$${amount.toLocaleString()}`;
 }

@@ -51,6 +51,7 @@ export interface ApplyAllowedTransactionResult {
  * Apply an ALLOWED decision: atomically bump spentToday, mark the txn ALLOWED,
  * and append a TRANSACTION_ALLOWED audit event.
  *
+ * Amounts are USD-equivalent (same unit as Transaction.amount / dailyLimit).
  * ConditionExpression ensures spentToday + amount <= dailyLimit at write time
  * so two concurrent ALLOWED paths cannot both commit past the daily ceiling.
  */

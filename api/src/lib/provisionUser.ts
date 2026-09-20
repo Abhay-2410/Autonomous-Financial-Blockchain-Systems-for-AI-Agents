@@ -164,17 +164,23 @@ export async function getOrCreateUser(phone: string): Promise<{
  * Cognito Hosted UI / email signup → same wallet provisioning as phone auth.
  * Identity key is Cognito `sub`; `phone` stores `cognito:<sub>` so session JWTs stay valid.
  * Uses lite wallet provisioning (no Friendbot) so Cognito signup stays fast/reliable.
+ * UI must display `email` / `displayName`, never the `phone` cognito: key.
  */
 export async function getOrCreateUserFromCognito(input: {
   cognitoSub: string;
   email: string;
+  emailVerified?: boolean;
 }): Promise<{ user: User; isNew: boolean }> {
   const existing = await findUserByCognitoSub(input.cognitoSub);
   if (existing) {
     const refreshed: User = {
       ...existing,
       email: input.email || existing.email,
-      displayName: input.email || existing.displayName || existing.phone,
+      emailVerified:
+        input.emailVerified !== undefined
+          ? input.emailVerified
+          : existing.emailVerified,
+      displayName: input.email || existing.displayName || existing.email,
       authProvider: existing.authProvider ?? "cognito",
       cognitoSub: input.cognitoSub,
     };
@@ -191,10 +197,11 @@ export async function getOrCreateUserFromCognito(input: {
     userId,
     phone: phoneKey,
     email: input.email,
+    emailVerified: input.emailVerified ?? false,
     cognitoSub: input.cognitoSub,
     authProvider: "cognito",
     walletId,
-    displayName: input.email || phoneKey,
+    displayName: input.email,
     createdAt: now,
     lastLoginAt: now,
   });

@@ -2,9 +2,13 @@
  * Custodial Stellar Testnet + XLM for LimitX.
  * Keypairs are ed25519; secrets sealed with AES-256-GCM (SESSION_SECRET).
  * @stellar/stellar-sdk is ESM — loaded via dynamic import for CJS Lambdas.
+ *
+ * Amounts passed into submitXlmPayment are USD-equivalent policy units;
+ * conversion to native XLM happens here only (see money.ts).
  */
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { formatXlmForStellar, policyUnitsToXlm } from "./money";
 
 export const STELLAR = {
   network: "testnet" as const,
@@ -123,10 +127,15 @@ export interface StellarPaymentResult {
 /**
  * Send native XLM from a custodial account.
  * Creates the destination account when it does not exist yet.
+ *
+ * `input.amount` is the USD-equivalent policy unit stored on Transaction —
+ * converted to XLM here with DEMO_USD_EQUIV_TO_XLM (1:1 on Testnet). Do not
+ * pre-scale callers.
  */
 export async function submitXlmPayment(input: {
   sealedSecret: string;
   destination: string;
+  /** USD-equivalent policy amount (same unit as Transaction.amount). */
   amount: number;
   memo?: string;
 }): Promise<StellarPaymentResult> {
@@ -142,11 +151,8 @@ export async function submitXlmPayment(input: {
 
   const secret = unsealStellarSecret(input.sealedSecret);
   const sourceKeys = Keypair.fromSecret(secret);
-  const amountNum = Number(input.amount);
-  if (!(amountNum > 0)) {
-    throw new Error("Stellar payment amount must be > 0");
-  }
-  const amount = amountNum.toFixed(7);
+  const xlmNum = policyUnitsToXlm(Number(input.amount));
+  const amount = formatXlmForStellar(Number(input.amount));
 
   const horizon = new Horizon.Server(STELLAR.horizonUrl);
   const account = await horizon.loadAccount(sourceKeys.publicKey());
@@ -164,7 +170,7 @@ export async function submitXlmPayment(input: {
   });
 
   if (!destinationExists) {
-    const starting = Math.max(amountNum, 2).toFixed(7);
+    const starting = Math.max(xlmNum, 2).toFixed(7);
     builder.addOperation(
       Operation.createAccount({
         destination: input.destination,

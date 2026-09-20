@@ -7,6 +7,7 @@ import {
   CognitoIdentityProviderClient,
   ConfirmSignUpCommand,
   InitiateAuthCommand,
+  ResendConfirmationCodeCommand,
   SignUpCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { cookies } from "next/headers";
@@ -98,41 +99,28 @@ export async function POST(req: Request) {
           ClientId: cfg.clientId,
           Username: email,
           Password: password,
-          UserAttributes: [
-            { Name: "email", Value: email },
-          ],
+          UserAttributes: [{ Name: "email", Value: email }],
         })
       );
-      // Auto-confirm pools can sign in immediately; otherwise ask for email code.
-      try {
-        const auth = await client.send(
-          new InitiateAuthCommand({
-            AuthFlow: "USER_PASSWORD_AUTH",
-            ClientId: cfg.clientId,
-            AuthParameters: {
-              USERNAME: email,
-              PASSWORD: password,
-            },
-          })
-        );
-        const idToken = auth.AuthenticationResult?.IdToken;
-        if (idToken) {
-          const session = await setLimitXSession(idToken);
-          return NextResponse.json({
-            ok: true,
-            signedIn: true,
-            isNew: true,
-            ...session,
-          });
-        }
-      } catch {
-        /* fall through to confirmation */
-      }
+      // Email must be verified before sign-in (no PreSignUp auto-confirm).
       return NextResponse.json({
         ok: true,
         needsConfirmation: true,
         message:
           "Account created. Enter the verification code we emailed you (check spam).",
+      });
+    }
+
+    if (action === "resend") {
+      await client.send(
+        new ResendConfirmationCodeCommand({
+          ClientId: cfg.clientId,
+          Username: email,
+        })
+      );
+      return NextResponse.json({
+        ok: true,
+        message: "Verification code sent. Check your email (and spam folder).",
       });
     }
 
@@ -214,7 +202,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json(
-      { message: "action must be signup, signin, or confirm" },
+      { message: "action must be signup, signin, confirm, or resend" },
       { status: 400 }
     );
   } catch (err) {

@@ -24,6 +24,7 @@ import { authorizeTransaction } from "./authorizeTransaction";
 
 interface TransactionRequestBody {
   agentId: string;
+  /** USD-equivalent (plain number). Never XLM/stroops/cents. */
   amount: number;
   recipient: string;
   type: string;

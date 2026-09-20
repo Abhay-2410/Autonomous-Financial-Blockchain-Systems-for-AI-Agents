@@ -64,9 +64,12 @@ export interface AgentWallet extends DynamoKeys {
   agentId: string;
   name: string;
   status: AgentStatus;
+  /** USD-equivalent daily soft ceiling (same unit as Transaction.amount). */
   dailyLimit: number;
+  /** USD-equivalent per-txn soft ceiling. */
   perTransactionLimit: number;
   allowedMerchants: string[];
+  /** USD-equivalent spent so far today (reset via spentTodayDate). */
   spentToday: number;
   /** YYYY-MM-DD — used to reset spentToday each calendar day */
   spentTodayDate: string;
@@ -76,7 +79,7 @@ export interface AgentWallet extends DynamoKeys {
   walletExpiresAt?: string;
   /** Allowed transaction `type` values; default purchase/payment/transfer/refund. */
   permittedTransactionTypes?: string[];
-  /** Total allocated balance for the period; defaults to dailyLimit. */
+  /** Total allocated balance for the period (USD-equivalent); defaults to dailyLimit. */
   allocatedBalance?: number;
   /** Agent prepaid card / Stellar G… or demo 0x address. */
   address?: string;
@@ -101,6 +104,10 @@ export interface Transaction extends DynamoKeys {
   entityType: "Transaction";
   agentId: string;
   txnId: string;
+  /**
+   * USD-equivalent amount (plain number). Same unit as dailyLimit /
+   * spentToday / Cedar checks. Converted to XLM only at Stellar settlement.
+   */
   amount: number;
   recipient: string;
   type: string;
@@ -148,9 +155,16 @@ export interface AuditEvent extends DynamoKeys {
 export interface User extends DynamoKeys {
   entityType: "User";
   userId: string;
-  /** E.164 for phone auth, or `cognito:<sub>` for Cognito-only accounts. */
+  /**
+   * Internal identity key for session JWTs:
+   * E.164 for phone auth, or `cognito:<sub>` for Cognito-only accounts.
+   * Never show this in the UI — use email / displayName instead.
+   */
   phone: string;
+  /** Cognito email (or linked email). Preferred UI identity. */
   email?: string;
+  /** From Cognito ID token `email_verified` claim. */
+  emailVerified?: boolean;
   cognitoSub?: string;
   authProvider?: "phone" | "cognito";
   walletId: string;

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   EmptyState,
   ErrorBanner,
+  formatUsd,
   LoadingBlock,
   PageHeader,
   SpendBar,
@@ -137,7 +138,7 @@ export default function WalletsPage() {
                 <div className="rounded-xl bg-[#f3f6f4] px-3.5 py-3">
                   <p className="text-xs font-medium text-[#5c6b63]">Daily budget</p>
                   <p className="mt-1 text-lg font-semibold text-[#14201a]">
-                    ${w.dailyLimit.toLocaleString()}
+                    {formatUsd(w.dailyLimit)}
                   </p>
                 </div>
                 <div className="rounded-xl bg-[#f3f6f4] px-3.5 py-3">
@@ -145,7 +146,7 @@ export default function WalletsPage() {
                     Card balance
                   </p>
                   <p className="mt-1 text-lg font-semibold text-[#14201a]">
-                    ${(w.allocatedBalance ?? 0).toLocaleString()}
+                    {formatUsd(w.allocatedBalance ?? 0)}
                   </p>
                 </div>
               </div>

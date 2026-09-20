@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   EmptyState,
   ErrorBanner,
+  formatUsd,
   formatWhen,
   friendlyEventLabel,
   PageHeader,
@@ -55,7 +56,7 @@ function detailLine(ev: AuditItem): string {
   const recipient =
     typeof d.recipient === "string" ? d.recipient : null;
   const parts: string[] = [];
-  if (amount !== null) parts.push(`$${amount.toLocaleString()}`);
+  if (amount !== null) parts.push(formatUsd(amount));
   if (recipient) parts.push(`to ${recipient}`);
   return parts.join(" ") || "Details recorded";
 }

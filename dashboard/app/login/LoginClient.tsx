@@ -94,6 +94,26 @@ export default function LoginClient() {
     }
   }
 
+  async function onResendCode() {
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await fetch("/api/auth/cognito/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "resend", email }),
+      });
+      const data = (await res.json()) as { message?: string };
+      if (!res.ok) throw new Error(data.message ?? "Could not resend code");
+      setInfo(data.message ?? "Verification code sent. Check your email.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resend code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSendSms(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -291,6 +311,14 @@ export default function LoginClient() {
                     />
                   </div>
                   <input type="hidden" value={password} readOnly />
+                  <button
+                    type="button"
+                    className="text-sm font-semibold text-[#0d7a5f] underline-offset-2 hover:underline disabled:opacity-60"
+                    disabled={busy || !email}
+                    onClick={() => void onResendCode()}
+                  >
+                    Resend verification email
+                  </button>
                 </>
               )}
 

@@ -8,11 +8,13 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
+  DeleteCommand,
   GetCommand,
   PutCommand,
   QueryCommand,
   ScanCommand,
   UpdateCommand,
+  type DeleteCommandInput,
   type GetCommandInput,
   type PutCommandInput,
   type QueryCommandInput,
@@ -131,6 +133,41 @@ export async function putItem<T extends AgentWalletItem>(
   };
   await docClient.send(new PutCommand(input));
   return item;
+}
+
+/** Typed DeleteItem by primary key. */
+export async function deleteItem(keys: DynamoKeys): Promise<void> {
+  const input: DeleteCommandInput = {
+    TableName: TABLE_NAME,
+    Key: { pk: keys.pk, sk: keys.sk },
+  };
+  await docClient.send(new DeleteCommand(input));
+}
+
+/**
+ * Scan all items of a given entityType (paginated). Used by demo-reset.
+ */
+export async function scanByEntityType(
+  entityType: string
+): Promise<AgentWalletItem[]> {
+  const items: AgentWalletItem[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+  do {
+    const input: ScanCommandInput = {
+      TableName: TABLE_NAME,
+      FilterExpression: "entityType = :et",
+      ExpressionAttributeValues: { ":et": entityType },
+      ExclusiveStartKey: exclusiveStartKey,
+    };
+    const result = await docClient.send(new ScanCommand(input));
+    for (const item of result.Items ?? []) {
+      items.push(item as AgentWalletItem);
+    }
+    exclusiveStartKey = result.LastEvaluatedKey as
+      | Record<string, unknown>
+      | undefined;
+  } while (exclusiveStartKey);
+  return items;
 }
 
 export interface UpdateItemParams {

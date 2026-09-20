@@ -1,12 +1,21 @@
 /**
  * Seed example agent-wallet data into DynamoDB.
  *
+ * Idempotent: always upserts the same fixed agentIds so re-runs never create
+ * orphaned shop-/ops- suffixes or duplicate agents.
+ *
+ *   shopping-bot  — demo shopping agent
+ *   vendor-agent  — demo vendor ops agent
+ *
  * Local (default — no AWS account needed):
  *   pnpm --filter @agent-wallet/api seed
  *
  * Against a real AWS table (needs AWS CLI credentials):
  *   $env:TABLE_NAME = "agent-wallet-dev"
  *   pnpm --filter @agent-wallet/api seed:aws
+ *
+ * Wipe txn/audit history without touching agents:
+ *   pnpm --filter @agent-wallet/api demo:reset
  */
 
 import { DEMO_CHAIN, demoAddressFromSeed } from "../src/lib/chain";
@@ -18,7 +27,10 @@ import {
   putItem,
 } from "../src/lib/dynamo";
 
-const WALLET_ID = "org-limitx";
+/** Stable demo wallet + agents — never randomly suffix these. */
+export const SEED_WALLET_ID = "org-limitx";
+export const SEED_AGENT_IDS = ["shopping-bot", "vendor-agent"] as const;
+
 const TODAY = new Date().toISOString().slice(0, 10);
 const NOW = new Date().toISOString();
 
@@ -69,22 +81,25 @@ export async function runSeed(): Promise<void> {
     `Seeding table "${getTableName()}"` +
       (endpoint ? ` via ${endpoint}` : " (AWS)")
   );
+  console.log(
+    `Idempotent upsert for wallet=${SEED_WALLET_ID} agents=${SEED_AGENT_IDS.join(",")}`
+  );
 
   await ensureTable();
 
   const parent = buildParentWallet({
-    walletId: WALLET_ID,
+    walletId: SEED_WALLET_ID,
     orgName: "LimitX",
     createdAt: NOW,
     balance: 250000,
-    address: demoAddressFromSeed(`parent:${WALLET_ID}`),
+    address: demoAddressFromSeed(`parent:${SEED_WALLET_ID}`),
     chainId: DEMO_CHAIN.chainId,
     tokenSymbol: DEMO_CHAIN.tokenSymbol,
     chainName: DEMO_CHAIN.name,
   });
 
   const shoppingBot = buildAgentWallet({
-    walletId: WALLET_ID,
+    walletId: SEED_WALLET_ID,
     agentId: "shopping-bot",
     name: "Shopping",
     status: "ACTIVE",
@@ -104,7 +119,7 @@ export async function runSeed(): Promise<void> {
   });
 
   const vendorAgent = buildAgentWallet({
-    walletId: WALLET_ID,
+    walletId: SEED_WALLET_ID,
     agentId: "vendor-agent",
     name: "Vendor ops",
     status: "ACTIVE",
@@ -127,10 +142,12 @@ export async function runSeed(): Promise<void> {
 
   for (const item of items) {
     await putItem(item);
-    console.log(`put ${item.entityType} ${item.pk} / ${item.sk}`);
+    console.log(`upsert ${item.entityType} ${item.pk} / ${item.sk}`);
   }
 
-  console.log(`Seeded ${items.length} items into table.`);
+  console.log(
+    `Seeded ${items.length} items (re-run safe; agentIds stay ${SEED_AGENT_IDS.join(", ")}).`
+  );
 }
 
 const entry = (process.argv[1] ?? "").replace(/\\/g, "/");

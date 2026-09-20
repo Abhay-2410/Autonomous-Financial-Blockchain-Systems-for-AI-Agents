@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ErrorBanner,
+  formatUsd,
   LoadingBlock,
   PageHeader,
 } from "../../components/ui";
@@ -128,7 +129,7 @@ export default function PayPage() {
     <div>
       <PageHeader
         title="Pay"
-        description="Policy decides allow / ask / block. Then LimitX signs and settles on Stellar Testnet (XLM), Base stub, or Prava card."
+        description="Enter a USD amount. Policy decides allow / ask / block. Settlement can be Stellar Testnet (1 USD = 1 XLM demo rate), Base stub, or Prava card."
       />
 
       {error && <ErrorBanner message={error} />}
@@ -147,7 +148,8 @@ export default function PayPage() {
             >
               {wallets.map((w) => (
                 <option key={w.agentId} value={w.agentId}>
-                  {w.name} · ${w.spentToday}/{w.dailyLimit} today
+                  {w.name} · {formatUsd(w.spentToday)}/{formatUsd(w.dailyLimit)}{" "}
+                  today
                 </option>
               ))}
             </select>
@@ -192,8 +194,10 @@ export default function PayPage() {
             </div>
             {rail === "stellar" && (
               <p className="mt-2 text-xs text-[#5c6b63]">
-                Custodial Stellar account pays native XLM on Testnet (Friendbot-funded).
-                Amount is in XLM.
+                Amount is USD (same unit as agent limits). At settlement LimitX
+                converts with the demo rate{" "}
+                <strong>1 USD = 1 XLM</strong> on Stellar Testnet
+                (Friendbot-funded custodial account).
               </p>
             )}
             {rail === "prava" && (
@@ -206,9 +210,7 @@ export default function PayPage() {
           </fieldset>
 
           <label className="block">
-            <span className="label">
-              Amount ({rail === "stellar" ? "XLM" : "USD / USDC"})
-            </span>
+            <span className="label">Amount (USD)</span>
             <input
               type="number"
               min={1}

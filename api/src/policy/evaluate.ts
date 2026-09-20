@@ -16,12 +16,15 @@ import schemaJson from "./schema.cedarschema.json";
 export interface PolicyAgentInput {
   agentId: string;
   status: AgentStatus;
+  /** USD-equivalent — same unit as Transaction.amount. */
   dailyLimit: number;
+  /** USD-equivalent — same unit as Transaction.amount. */
   perTransactionLimit: number;
   allowedMerchants: string[];
 }
 
 export interface PolicyTransactionInput {
+  /** USD-equivalent — never stroops / cents / XLM. */
   amount: number;
   /** Merchant / payee — matched against allowedMerchants */
   recipient: string;

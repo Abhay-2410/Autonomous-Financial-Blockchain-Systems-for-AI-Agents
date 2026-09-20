@@ -54,9 +54,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
   const publicAgents = agents.map(({ apiKey: _k, stellarSecretEnc: _s, ...rest }) => rest);
 
-  const agentIds = new Set(agents.map((a) => a.agentId));
-  const pendingAll = await listPendingApprovalTransactions();
-  const pending = pendingAll.filter((t) => agentIds.has(t.agentId));
+  // Same source as GET /approvals/pending — do not filter by local agent list
+  // (that caused Home "Needs approval: 0" while the Approvals inbox had items).
+  const pending = await listPendingApprovalTransactions();
 
   const totalAllocated = agents.reduce(
     (sum, a) => sum + (a.allocatedBalance ?? a.dailyLimit),

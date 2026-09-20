@@ -12,7 +12,9 @@
     "dynamodb:down": "docker compose down",
     "seed": "tsx scripts/run-seed-local.ts",
     "seed:local": "tsx scripts/run-seed-local.ts",
-    "seed:aws": "tsx scripts/seed.ts"
+    "seed:aws": "tsx scripts/seed.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts",
+    "demo:reset:aws": "tsx scripts/demo-reset.ts"
   },
   "engines": {
     "node": ">=20"

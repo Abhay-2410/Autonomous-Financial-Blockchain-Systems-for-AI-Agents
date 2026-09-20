@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const LINKS = [
   { href: "/", label: "Home", hint: "Balance" },
@@ -12,21 +12,76 @@ const LINKS = [
   { href: "/audit", label: "Activity", hint: "History" },
 ] as const;
 
+type MeUser = {
+  email?: string | null;
+  emailVerified?: boolean | null;
+  displayName?: string | null;
+  phone?: string | null;
+  authProvider?: string | null;
+};
+
+function identityLabel(user: MeUser): {
+  text: string;
+  unverified: boolean;
+  email: string | null;
+} {
+  const looksLikeUuid = (v: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      v
+    );
+  const email =
+    user.email && user.email.includes("@") && !user.email.startsWith("cognito:")
+      ? user.email
+      : null;
+  const display =
+    user.displayName &&
+    !user.displayName.startsWith("cognito:") &&
+    !looksLikeUuid(user.displayName) &&
+    user.displayName !== user.phone
+      ? user.displayName
+      : null;
+  const phone =
+    user.phone && !user.phone.startsWith("cognito:") ? user.phone : null;
+
+  const primary = email ?? display ?? phone;
+  if (!primary) {
+    return { text: "", unverified: false, email: null };
+  }
+
+  const unverified =
+    Boolean(email) &&
+    user.authProvider === "cognito" &&
+    user.emailVerified === false;
+
+  return {
+    text: unverified ? `Unverified: ${email}` : primary,
+    unverified,
+    email,
+  };
+}
+
 export function Nav() {
   const pathname = usePathname();
   const router = useRouter();
-  const [phone, setPhone] = useState<string | null>(null);
+  const [me, setMe] = useState<MeUser | null>(null);
+  const [resendState, setResendState] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
 
-  useEffect(() => {
+  const loadMe = useCallback(() => {
     if (pathname === "/login" || pathname.startsWith("/login/")) return;
     fetch("/api/auth/me")
       .then(async (r) => {
         if (!r.ok) return null;
-        return r.json() as Promise<{ user?: { phone?: string } }>;
+        return r.json() as Promise<{ user?: MeUser }>;
       })
-      .then((data) => setPhone(data?.user?.phone ?? null))
-      .catch(() => setPhone(null));
+      .then((data) => setMe(data?.user ?? null))
+      .catch(() => setMe(null));
   }, [pathname]);
+
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
 
   if (pathname === "/login" || pathname.startsWith("/login/")) return null;
 
@@ -35,6 +90,28 @@ export function Nav() {
     router.replace("/login");
     router.refresh();
   }
+
+  async function resendVerification() {
+    const email = me?.email;
+    if (!email) return;
+    setResendState("sending");
+    try {
+      const res = await fetch("/api/auth/cognito/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "resend", email }),
+      });
+      if (!res.ok) {
+        setResendState("error");
+        return;
+      }
+      setResendState("sent");
+    } catch {
+      setResendState("error");
+    }
+  }
+
+  const identity = me ? identityLabel(me) : null;
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#d5ddd8]/80 bg-white/80 backdrop-blur-md">
@@ -89,9 +166,28 @@ export function Nav() {
               );
             })}
           </nav>
-          {phone && (
-            <span className="hidden font-mono text-xs text-[#5c6b63] sm:inline">
-              {phone}
+          {identity?.text && (
+            <span className="hidden max-w-[14rem] truncate text-xs text-[#5c6b63] sm:inline">
+              {identity.text}
+              {identity.unverified && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="font-semibold text-[#0d7a5f] underline-offset-2 hover:underline disabled:opacity-60"
+                    disabled={resendState === "sending" || resendState === "sent"}
+                    onClick={() => void resendVerification()}
+                  >
+                    {resendState === "sent"
+                      ? "Code sent"
+                      : resendState === "sending"
+                        ? "Sending…"
+                        : resendState === "error"
+                          ? "Retry resend"
+                          : "Resend verification"}
+                  </button>
+                </>
+              )}
             </span>
           )}
           <button type="button" className="btn-secondary !px-3 !py-1.5 text-xs" onClick={logout}>

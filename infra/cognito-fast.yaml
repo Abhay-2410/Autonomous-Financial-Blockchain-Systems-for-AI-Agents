@@ -1,6 +1,6 @@
 # Cognito-only — deploys in ~1 minute (no Lambda packaging of full API)
 AWSTemplateFormatVersion: "2010-09-09"
-Description: LimitX Cognito User Pool + Hosted UI + auto-confirm for email signup
+Description: LimitX Cognito User Pool + Hosted UI (email as username, email verification required)
 
 Parameters:
   Environment:
@@ -14,53 +14,17 @@ Parameters:
     Default: https://main.d3ossfbvxnc0f7.amplifyapp.com/login/cognito
 
 Resources:
-  PreSignUpAutoConfirm:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub limitx-cognito-presignup-${Environment}
-      Runtime: nodejs20.x
-      Handler: index.handler
-      Role: !GetAtt PreSignUpRole.Arn
-      Timeout: 5
-      Code:
-        ZipFile: |
-          exports.handler = async (event) => {
-            event.response.autoConfirmUser = true;
-            event.response.autoVerifyEmail = true;
-            return event;
-          };
-
-  PreSignUpRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  PreSignUpPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref PreSignUpAutoConfirm
-      Action: lambda:InvokeFunction
-      Principal: cognito-idp.amazonaws.com
-      SourceArn: !GetAtt LimitXUserPool.Arn
-
   LimitXUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub limitx-users-${Environment}
+      # Email is the primary username (NOT AliasAttributes). Users sign up/in with email.
+      # Do not switch to AliasAttributes — that yields UUID cognito:username values.
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       UsernameConfiguration:
         CaseSensitive: false
-      LambdaConfig:
-        PreSignUp: !GetAtt PreSignUpAutoConfirm.Arn
+      # No PreSignUp auto-confirm: users must verify email before they can sign in.
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -72,6 +36,10 @@ Resources:
         - Name: email
           Required: true
           Mutable: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
 
   LimitXUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -101,6 +69,12 @@ Resources:
         AccessToken: hours
         IdToken: hours
         RefreshToken: days
+      # Ensure ID tokens include email / email_verified for dashboard display.
+      ReadAttributes:
+        - email
+        - email_verified
+      WriteAttributes:
+        - email
 
   LimitXUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain

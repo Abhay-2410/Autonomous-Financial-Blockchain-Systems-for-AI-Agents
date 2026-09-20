@@ -2,6 +2,10 @@
  * Stub settlement for the demo — not a live RPC yet.
  * Produces EVM-looking tx hashes + Basescan explorer URLs so the payments UI
  * can show "View on explorer" like a real chain wallet app.
+ *
+ * Amounts: Transaction.amount is USD-equivalent end-to-end. This stub does NOT
+ * convert units. Stellar XLM conversion happens only in submitStellarPayment →
+ * submitXlmPayment via money.DEMO_USD_EQUIV_TO_XLM (1 unit = 1 XLM on Testnet).
  */
 
 import type { Handler } from "aws-lambda";

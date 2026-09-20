@@ -1,10 +1,14 @@
 /**
  * Submit a custodial Stellar Testnet XLM payment and mark the txn CONFIRMED.
+ *
+ * Transaction.amount stays USD-equivalent in Dynamo/audit. The only XLM
+ * conversion is inside submitXlmPayment (DEMO_USD_EQUIV_TO_XLM, 1:1 demo).
  */
 
 import { getItem, putItem, updateItem, getAgentById } from "./dynamo";
 import { ensureAgentStellar } from "./ensureStellar";
 import { merchantPayoutAddress } from "./merchants";
+import { DEMO_USD_EQUIV_TO_XLM } from "./money";
 import {
   Keys,
   buildAuditEvent,
@@ -76,6 +80,7 @@ export async function submitStellarPayment(
     },
   });
 
+  // Final settlement only: USD-equivalent → XLM (demo rate labeled in money.ts).
   const paid = await submitXlmPayment({
     sealedSecret: agent.stellarSecretEnc,
     destination,
@@ -128,10 +133,12 @@ export async function submitStellarPayment(
         fromAddress: paid.from,
         toAddress: paid.to,
         tokenSymbol: STELLAR.tokenSymbol,
+        // Keep audit amount in USD-equivalent (same as Transaction.amount).
         amount: txn.amount,
         recipient: txn.recipient,
         settlementMode: STELLAR.settlementMode,
         settlementRail: "stellar",
+        demoUsdEquivToXlm: DEMO_USD_EQUIV_TO_XLM,
       },
     })
   );

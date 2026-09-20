@@ -32,6 +32,34 @@ function getVerifier() {
   return verifier;
 }
 
+function looksLikeEmail(value: string | undefined): value is string {
+  if (!value) return false;
+  const v = value.trim();
+  // Cognito alias-mode usernames are UUIDs — never treat those as email.
+  return v.includes("@") && !v.startsWith("cognito:");
+}
+
+/** True when Cognito reports the email attribute as verified. */
+export function isEmailVerifiedClaim(
+  value: boolean | string | undefined
+): boolean {
+  return value === true || value === "true";
+}
+
+/**
+ * Prefer the ID token `email` claim for display/provisioning.
+ * Fall back to `cognito:username` only when it looks like an email
+ * (UsernameAttributes: [email] pools). Never use raw UUID usernames.
+ */
+export function emailFromCognitoClaims(
+  claims: CognitoIdClaims
+): string | undefined {
+  if (looksLikeEmail(claims.email)) return claims.email.trim().toLowerCase();
+  const username = claims["cognito:username"];
+  if (looksLikeEmail(username)) return username.trim().toLowerCase();
+  return undefined;
+}
+
 export async function verifyCognitoIdToken(
   idToken: string
 ): Promise<CognitoIdClaims | null> {

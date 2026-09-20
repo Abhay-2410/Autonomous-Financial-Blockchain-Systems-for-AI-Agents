@@ -4,10 +4,16 @@
  *   POST /auth/cognito/exchange — { idToken } → LimitX session JWT + provision wallet
  *
  * Phone OTP auth is unchanged; this only adds an alternate identity path.
+ * Display identity comes from the ID token `email` claim (never cognito:username UUID).
  */
 
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
-import { cognitoPublicConfig, verifyCognitoIdToken } from "../lib/cognito";
+import {
+  cognitoPublicConfig,
+  emailFromCognitoClaims,
+  isEmailVerifiedClaim,
+  verifyCognitoIdToken,
+} from "../lib/cognito";
 import { json } from "../lib/http";
 import { getOrCreateUserFromCognito } from "../lib/provisionUser";
 import { signSession } from "../lib/session";
@@ -62,14 +68,20 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     return json(401, { message: "Invalid or expired Cognito ID token" });
   }
 
-  const email =
-    claims.email?.trim() ||
-    claims["cognito:username"]?.trim() ||
-    `${claims.sub}@cognito.local`;
+  const email = emailFromCognitoClaims(claims);
+  if (!email) {
+    return json(400, {
+      message:
+        "Cognito ID token has no email claim. Ensure the app client requests the email scope and the user has an email attribute.",
+    });
+  }
+
+  const emailVerified = isEmailVerifiedClaim(claims.email_verified);
 
   const { user, isNew } = await getOrCreateUserFromCognito({
     cognitoSub: claims.sub,
     email,
+    emailVerified,
   });
 
   const token = signSession({
@@ -85,6 +97,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       userId: user.userId,
       phone: user.phone,
       email: user.email ?? email,
+      emailVerified: user.emailVerified ?? emailVerified,
       walletId: user.walletId,
       displayName: user.displayName ?? email,
       authProvider: user.authProvider ?? "cognito",

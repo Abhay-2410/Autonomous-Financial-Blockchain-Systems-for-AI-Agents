@@ -1,56 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import {
   EmptyState,
   ErrorBanner,
+  formatUsd,
   formatWhen,
   PageHeader,
 } from "../../components/ui";
 import {
   ApiError,
   approveTransaction,
-  listPendingApprovals,
   rejectTransaction,
-  type PendingApproval,
 } from "../../lib/api";
+import { usePendingApprovals } from "../../lib/usePendingApprovals";
 
 export default function ApprovalsPage() {
-  const [pending, setPending] = useState<PendingApproval[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, reload } = usePendingApprovals({ pollMs: 3000 });
+  const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await listPendingApprovals();
-      setPending(res.pending);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "We couldn’t load approvals right now."
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 3000);
-    return () => clearInterval(id);
-  }, [load]);
 
   async function act(transactionId: string, action: "approve" | "reject") {
     setBusy(transactionId);
+    setActionError(null);
     try {
       if (action === "approve") {
         await approveTransaction(transactionId);
       } else {
         await rejectTransaction(transactionId);
       }
-      await load();
+      await reload();
     } catch (err) {
-      setError(
+      setActionError(
         err instanceof ApiError
           ? err.message
           : action === "approve"
@@ -75,7 +56,9 @@ export default function ApprovalsPage() {
         }
       />
 
-      {error && <ErrorBanner message={error} />}
+      {(error || actionError) && (
+        <ErrorBanner message={actionError ?? error ?? ""} />
+      )}
 
       {pending.length === 0 ? (
         <EmptyState
@@ -92,7 +75,7 @@ export default function ApprovalsPage() {
                     {p.agentId} · {formatWhen(p.timestamp)}
                   </p>
                   <h2 className="mt-1 font-display text-2xl font-bold text-[#14201a]">
-                    ${p.amount.toLocaleString()}{" "}
+                    {formatUsd(p.amount)}{" "}
                     <span className="text-lg font-semibold text-[#5c6b63]">
                       to {p.recipient}
                     </span>

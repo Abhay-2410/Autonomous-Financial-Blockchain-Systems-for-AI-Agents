@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   ErrorBanner,
+  formatUsd,
   LoadingBlock,
   PageHeader,
 } from "../components/ui";
@@ -13,10 +14,12 @@ import {
   shortAddress,
   type HomeSummary,
 } from "../lib/api";
+import { usePendingApprovals } from "../lib/usePendingApprovals";
 
 export default function HomePage() {
   const [data, setData] = useState<HomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { count: pendingApprovals } = usePendingApprovals({ pollMs: 3000 });
 
   const load = useCallback(async () => {
     try {
@@ -94,7 +97,7 @@ export default function HomePage() {
               <div className="rounded-xl bg-[#f3f6f4] px-4 py-3">
                 <p className="text-xs font-medium text-[#5c6b63]">Spent today</p>
                 <p className="mt-1 text-xl font-semibold">
-                  ${data.totals.spentToday.toLocaleString()}
+                  {formatUsd(data.totals.spentToday)}
                 </p>
               </div>
               <div className="rounded-xl bg-[#f3f6f4] px-4 py-3">
@@ -103,14 +106,17 @@ export default function HomePage() {
                   {data.totals.activeAgents}/{data.totals.agentCount}
                 </p>
               </div>
-              <div className="rounded-xl bg-[#fff7e6] px-4 py-3">
+              <Link
+                href="/approvals"
+                className="rounded-xl bg-[#fff7e6] px-4 py-3 transition hover:bg-[#ffefcc]"
+              >
                 <p className="text-xs font-medium text-amber-800">
                   Needs approval
                 </p>
                 <p className="mt-1 text-xl font-semibold text-amber-900">
-                  {data.totals.pendingApprovals}
+                  {pendingApprovals}
                 </p>
-              </div>
+              </Link>
             </div>
           </section>
 
@@ -133,6 +139,7 @@ export default function HomePage() {
               <span className="text-lg font-semibold">Approvals</span>
               <span className="text-sm text-[#5c6b63]">
                 Review waiting payments
+                {pendingApprovals > 0 ? ` (${pendingApprovals})` : ""}
               </span>
             </Link>
             <Link
@@ -166,10 +173,10 @@ export default function HomePage() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold">
-                        ${a.spentToday.toLocaleString()}
+                        {formatUsd(a.spentToday)}
                         <span className="font-normal text-[#8a968e]">
                           {" "}
-                          / ${a.dailyLimit.toLocaleString()}
+                          / {formatUsd(a.dailyLimit)}
                         </span>
                       </p>
                       <p className="text-xs text-[#5c6b63]">{a.status}</p>
