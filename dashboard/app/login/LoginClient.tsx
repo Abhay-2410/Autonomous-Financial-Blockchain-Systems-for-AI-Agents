@@ -67,6 +67,7 @@ export default function LoginClient() {
       sessionStorage.setItem(VERIFIER_KEY, verifier);
       sessionStorage.setItem(STATE_KEY, state);
       sessionStorage.setItem(NEXT_KEY, nextPath);
+      sessionStorage.removeItem("limitx_cognito_exchange_lock");
       const redirectUri = `${window.location.origin}/login/cognito`;
       const url = buildAuthorizeUrl({
         hostedUiBase: cfg.hostedUiBase,

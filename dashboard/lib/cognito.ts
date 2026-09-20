@@ -38,9 +38,14 @@ export async function createPkcePair(): Promise<{
 }
 
 export function cognitoRedirectUri(origin?: string): string {
+  // Always prefer the current origin so authorize + token exchange match.
+  // (A baked Amplify URL in env would break localhost logins.)
+  if (origin) return `${origin.replace(/\/$/, "")}/login/cognito`;
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/login/cognito`;
+  }
   const fromEnv = process.env.NEXT_PUBLIC_COGNITO_REDIRECT_URI?.trim();
   if (fromEnv) return fromEnv;
-  if (origin) return `${origin.replace(/\/$/, "")}/login/cognito`;
   return "http://localhost:3000/login/cognito";
 }
 
