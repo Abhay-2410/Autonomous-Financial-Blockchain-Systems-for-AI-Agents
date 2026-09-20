@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { Nav } from "../components/Nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "agent-wallet",
-  description: "Financial control layer for AI agents",
+  title: "LimitX Pay",
+  description: "Pay with AI agents — safely",
 };
 
 export default function RootLayout({
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="min-h-screen antialiased">
+        <Nav />
+        <main className="mx-auto max-w-6xl px-5 py-8 sm:py-10">{children}</main>
+      </body>
     </html>
   );
 }

@@ -1,0 +1,22 @@
+# SAM CLI config — default deploy region for this project.
+# Override at deploy time with: sam deploy --region <other-region>
+# template.yaml uses AWS::Region only (no hardcoded regions).
+
+version = 0.1
+
+[default.global.parameters]
+region = "eu-north-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "agent-wallet-dev"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+region = "eu-north-1"
+parameter_overrides = "Environment=dev"
+image_repositories = []
+disable_rollback = false

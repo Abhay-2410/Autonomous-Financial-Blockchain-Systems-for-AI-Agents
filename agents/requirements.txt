@@ -1,0 +1,2 @@
+# Strands Agents SDK — pin when integrating
+strands-agents>=0.1.0

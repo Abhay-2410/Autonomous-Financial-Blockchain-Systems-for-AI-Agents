@@ -1,0 +1,5 @@
+/target/
+**/*.eif
+pcr0.txt
+eif-describe.json
+Cargo.lock

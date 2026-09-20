@@ -1,0 +1,642 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: agent-wallet — AWS resources for the hackathon project
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref AgentWalletTable
+        WALLET_ID: org-limitx
+        OWNER_API_KEY: limitx-owner-demo-key
+        ENVIRONMENT: !Ref Environment
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+Resources:
+  # --- API Gateway ---
+  AgentWalletApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub agent-wallet-api-${Environment}
+      StageName: !Ref Environment
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,X-Api-Key,Authorization,X-Requested-With,X-Owner-Key'"
+        AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+
+  # --- SNS: human approver notifications ---
+  ApprovalTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub agent-wallet-approvals-${Environment}
+      DisplayName: Agent Wallet Approvals
+
+  # --- SNS + EventBridge: high-spend / deny alerts (demo) ---
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub agent-wallet-alerts-${Environment}
+      DisplayName: Agent Wallet Alerts
+
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AlertTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt HighSpendAlertRule.Arn
+
+  AlertLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /agent-wallet/${Environment}/alerts
+      RetentionInDays: 14
+
+  # CloudWatch Logs targets use a resource policy (not Target RoleArn).
+  AlertLogGroupResourcePolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName: !Sub agent-wallet-alerts-eb-${Environment}
+      PolicyDocument: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "EventBridgeToAlertLogs",
+              "Effect": "Allow",
+              "Principal": { "Service": "events.amazonaws.com" },
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "${AlertLogGroup.Arn}:*"
+            }
+          ]
+        }
+
+  # Fires on TRANSACTION_DENIED / TRANSACTION_ALLOWED when amount > 80% of remaining daily budget
+  HighSpendAlertRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub agent-wallet-high-spend-${Environment}
+      Description: Deny or allow events where spend exceeds 80% of remaining daily limit
+      EventBusName: default
+      State: ENABLED
+      EventPattern:
+        source:
+          - agent-wallet
+        detail-type:
+          - TRANSACTION_DENIED
+          - TRANSACTION_ALLOWED
+        detail:
+          exceedsEightyPercentRemaining:
+            - true
+      Targets:
+        - Id: AlertSns
+          Arn: !Ref AlertTopic
+        - Id: AlertCloudWatchLogs
+          Arn: !GetAtt AlertLogGroup.Arn
+
+  # --- KMS asymmetric signing key (secp256k1) ---
+  TransactionSigningKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub agent-wallet secp256k1 signer (${Environment})
+      KeySpec: ECC_SECG_P256K1
+      KeyUsage: SIGN_VERIFY
+      EnableKeyRotation: false
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+
+  TransactionSigningKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/agent-wallet-sign-${Environment}
+      TargetKeyId: !Ref TransactionSigningKey
+
+  SignTransactionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub agent-wallet-sign-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBTxnReadUpdate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource: !GetAtt AgentWalletTable.Arn
+        # kms:Sign / kms:DescribeKey are intentionally NOT on this role.
+        # Production signing is exclusive to NitroEnclaveInstanceRole
+        # (see infra/nitro-enclave/). This Lambda must call the enclave host.
+
+  # --- Data store ---
+  AgentWalletTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub agent-wallet-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  # --- Core API Lambdas ---
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-health-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/health.handler
+      Events:
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /health
+            Method: GET
+
+  AuthorizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-authorize-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/authorize.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        Authorize:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /authorize
+            Method: POST
+
+  PoliciesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-policies-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/policies.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        Policies:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /policies
+            Method: GET
+        PolicyByAgent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /policies/{agentId}
+            Method: GET
+
+  ListWalletsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-list-wallets-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/listWallets.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        ListWallets:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /wallets
+            Method: GET
+
+  GetHomeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-home-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/getHome.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        GetHome:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /home
+            Method: GET
+
+  ListMerchantsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-merchants-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/listMerchants.handler
+      Events:
+        ListMerchants:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /merchants
+            Method: GET
+
+  UpdateWalletFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-update-wallet-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/updateWallet.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        UpdateWallet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /wallets/{agentId}
+            Method: PATCH
+
+  TopUpWalletFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-topup-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/topUpWallet.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        TopUpWallet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /wallets/{agentId}/topup
+            Method: POST
+
+  TransactionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-transactions-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/transactions.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        Transactions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /transactions
+            Method: GET
+
+  RequestTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-request-txn-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/requestTransaction.handler
+      Environment:
+        Variables:
+          SIGN_TRANSACTION_FUNCTION_NAME: !Ref SignTransactionFunction
+          APPROVAL_STATE_MACHINE_ARN: !Ref ApprovalStateMachine
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+        - Statement:
+            - Sid: InvokeIsolatedSignerOnly
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt SignTransactionFunction.Arn
+            - Sid: StartApprovalWorkflow
+              Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref ApprovalStateMachine
+            - Sid: PutAgentWalletEvents
+              Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+      Events:
+        RequestTransaction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /transactions
+            Method: POST
+
+  SignTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-sign-txn-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/signTransaction.handler
+      Role: !GetAtt SignTransactionExecutionRole.Arn
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref TransactionSigningKey
+
+  # --- Approval workflow Lambdas ---
+  StoreApprovalTaskTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-store-token-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/storeApprovalTaskToken.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+
+  OnApproveTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-on-approve-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/onApproveTransaction.handler
+      Timeout: 60
+      Environment:
+        Variables:
+          SIGN_TRANSACTION_FUNCTION_NAME: !Ref SignTransactionFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt SignTransactionFunction.Arn
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: "*"
+
+  OnRejectTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-on-reject-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/onRejectTransaction.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+
+  ApproveTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-approve-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/approveTransaction.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:SendTaskSuccess
+              Resource: "*"
+      Events:
+        Approve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /approvals/{transactionId}/approve
+            Method: POST
+
+  RejectTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-reject-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/rejectTransaction.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:SendTaskFailure
+              Resource: "*"
+      Events:
+        Reject:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /approvals/{transactionId}/reject
+            Method: POST
+
+  ListPendingApprovalsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-pending-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/listPendingApprovals.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        ListPending:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /approvals/pending
+            Method: GET
+
+  GetAuditLogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-audit-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/getAuditLog.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        GetAudit:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /audit
+            Method: GET
+
+  # --- Step Functions: PENDING_APPROVAL human escalation ---
+  ApprovalStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApprovalStateMachinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref ApprovalTopic
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt StoreApprovalTaskTokenFunction.Arn
+                  - !GetAtt OnApproveTransactionFunction.Arn
+                  - !GetAtt OnRejectTransactionFunction.Arn
+
+  ApprovalStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub agent-wallet-approval-${Environment}
+      Role: !GetAtt ApprovalStateMachineRole.Arn
+      Definition:
+        Comment: Human approval for PENDING_APPROVAL agent spends
+        StartAt: NotifyApprover
+        States:
+          NotifyApprover:
+            Type: Task
+            Resource: arn:aws:states:::sns:publish
+            Parameters:
+              TopicArn: !Ref ApprovalTopic
+              Subject: !Sub "Agent Wallet approval needed (${Environment})"
+              Message.$: States.Format('Approval required for transaction {} agent {} amount {} to {}. POST /approvals/{}/approve or /reject', $.transactionId, $.agentId, $.amount, $.recipient, $.transactionId)
+            ResultPath: $.notifyResult
+            Next: WaitForApproval
+
+          WaitForApproval:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke.waitForTaskToken
+            Parameters:
+              FunctionName: !GetAtt StoreApprovalTaskTokenFunction.Arn
+              Payload:
+                token.$: $$.Task.Token
+                agentId.$: $.agentId
+                transactionId.$: $.transactionId
+                timestamp.$: $.timestamp
+                executionArn.$: $$.Execution.Id
+            TimeoutSeconds: 604800
+            ResultPath: $.approvalResult
+            Next: OnApprove
+            Catch:
+              - ErrorEquals:
+                  - States.ALL
+                ResultPath: $.errorInfo
+                Next: OnReject
+
+          OnApprove:
+            Type: Task
+            Resource: !GetAtt OnApproveTransactionFunction.Arn
+            Parameters:
+              agentId.$: $.agentId
+              walletId.$: $.walletId
+              transactionId.$: $.transactionId
+              timestamp.$: $.timestamp
+              amount.$: $.amount
+              recipient.$: $.recipient
+              type.$: $.type
+              purpose.$: $.purpose
+            End: true
+
+          OnReject:
+            Type: Task
+            Resource: !GetAtt OnRejectTransactionFunction.Arn
+            Parameters:
+              agentId.$: $.agentId
+              walletId.$: $.walletId
+              transactionId.$: $.transactionId
+              timestamp.$: $.timestamp
+              amount.$: $.amount
+              recipient.$: $.recipient
+              type.$: $.type
+              purpose.$: $.purpose
+            End: true
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${AgentWalletApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref AgentWalletTable
+  SigningKeyId:
+    Description: KMS secp256k1 key id (kms:Sign only via Nitro enclave instance role — see infra/nitro-enclave/)
+    Value: !Ref TransactionSigningKey
+  SigningKeyArn:
+    Description: Full ARN of the signing key (pass to nitro-enclave stack as SigningKeyArn)
+    Value: !GetAtt TransactionSigningKey.Arn
+  SignTransactionFunctionName:
+    Description: Internal signer Lambda (hackathon stub; production must proxy to Nitro host)
+    Value: !Ref SignTransactionFunction
+  NitroEnclaveStackHint:
+    Description: Deploy production signer host
+    Value: infra/nitro-enclave/nitro-enclave.yaml
+  ApprovalStateMachineArn:
+    Description: Human approval Step Functions state machine
+    Value: !Ref ApprovalStateMachine
+  ApprovalTopicArn:
+    Description: SNS topic for approval notifications
+    Value: !Ref ApprovalTopic
+  AlertTopicArn:
+    Description: SNS topic for high-spend / deny EventBridge alerts
+    Value: !Ref AlertTopic
+  AlertLogGroupName:
+    Description: CloudWatch Logs group for the same alerts (demo sink)
+    Value: !Ref AlertLogGroup

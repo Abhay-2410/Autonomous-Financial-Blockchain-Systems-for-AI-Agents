@@ -1,0 +1,19 @@
+{
+  "name": "agent-wallet",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AWS-native financial control layer for AI agents",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev:dashboard": "pnpm --filter @agent-wallet/dashboard dev",
+    "build:api": "pnpm --filter @agent-wallet/api build",
+    "build:dashboard": "pnpm --filter @agent-wallet/dashboard build",
+    "sam:build": "pnpm build:api && sam build --template infra/template.yaml --build-dir infra/.aws-sam/build",
+    "sam:deploy": "sam deploy --template-file infra/.aws-sam/build/template.yaml --config-file infra/samconfig.toml --config-env default"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=8"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

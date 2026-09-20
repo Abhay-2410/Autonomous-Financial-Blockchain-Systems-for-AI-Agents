@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  LimitX / agent-wallet — Nitro Enclave signing host (production path).
+  Exclusive kms:Sign + kms:DescribeKey on the transaction signing key.
+  Deploy after the main agent-wallet stack; pass SigningKeyArn from its outputs.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  SigningKeyArn:
+    Type: String
+    Description: ARN of the ECC_SECG_P256K1 TransactionSigningKey from the main stack
+
+  InstanceType:
+    Type: String
+    Default: c5.xlarge
+    AllowedValues: [c5.xlarge, m5.xlarge]
+    Description: Nitro Enclaves–capable instance type
+
+  EnclaveCpuCount:
+    Type: Number
+    Default: 2
+    MinValue: 2
+    Description: vCPUs reserved for the enclave (allocator.yaml cpu_count)
+
+  EnclaveMemoryMiB:
+    Type: Number
+    Default: 256
+    MinValue: 256
+    Description: Memory reserved for the enclave in MiB (allocator.yaml memory_mib)
+
+  VpcCidr:
+    Type: String
+    Default: 10.20.0.0/16
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.20.0.0/24
+
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.20.1.0/24
+
+  SigningServicePort:
+    Type: Number
+    Default: 8443
+    Description: TCP port for VPC-internal signer API (parent → enclave via vsock later)
+
+Resources:
+  # --- Network (private enclave host; NAT for package install / KMS API) ---
+  NitroVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-vpc-${Environment}
+
+  NitroInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-igw-${Environment}
+
+  NitroIgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref NitroVpc
+      InternetGatewayId: !Ref NitroInternetGateway
+
+  NitroPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NitroVpc
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-public-${Environment}
+
+  NitroPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NitroVpc
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-private-${Environment}
+
+  NitroPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NitroVpc
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-public-rt-${Environment}
+
+  NitroPublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NitroIgwAttach
+    Properties:
+      RouteTableId: !Ref NitroPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref NitroInternetGateway
+
+  NitroPublicSubnetRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref NitroPublicSubnet
+      RouteTableId: !Ref NitroPublicRouteTable
+
+  NitroNatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: NitroIgwAttach
+    Properties:
+      Domain: vpc
+
+  NitroNatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NitroNatEip.AllocationId
+      SubnetId: !Ref NitroPublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-nat-${Environment}
+
+  NitroPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NitroVpc
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-private-rt-${Environment}
+
+  NitroPrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref NitroPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NitroNatGateway
+
+  NitroPrivateSubnetRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref NitroPrivateSubnet
+      RouteTableId: !Ref NitroPrivateRouteTable
+
+  # KMS interface endpoint — enclave host reaches KMS without public internet path
+  NitroKmsEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub KMS VPC endpoint SG (${Environment})
+      VpcId: !Ref NitroVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-kms-vpce-sg-${Environment}
+
+  NitroKmsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref NitroVpc
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.kms
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref NitroPrivateSubnet
+      SecurityGroupIds:
+        - !Ref NitroKmsEndpointSg
+
+  # Inbound only from this VPC (API Lambdas later attach to VPC / peering)
+  NitroEnclaveSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Nitro enclave host — VPC-only ingress (${Environment})
+      VpcId: !Ref NitroVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref SigningServicePort
+          ToPort: !Ref SigningServicePort
+          CidrIp: !Ref VpcCidr
+          Description: Signer API from VPC (Lambdas / internal clients)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: Optional TLS from VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Outbound for dnf/docker and KMS (prefer VPCE)
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-host-sg-${Environment}
+
+  # --- IAM: ONLY principal allowed kms:Sign / kms:DescribeKey on the signing key ---
+  NitroEnclaveInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub agent-wallet-nitro-enclave-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: KmsSignDescribeOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SignAndDescribeTransactionKeyOnly
+                Effect: Allow
+                Action:
+                  - kms:Sign
+                  - kms:DescribeKey
+                Resource: !Ref SigningKeyArn
+
+  NitroEnclaveInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub agent-wallet-nitro-enclave-profile-${Environment}
+      Roles:
+        - !Ref NitroEnclaveInstanceRole
+
+  # Amazon Linux 2023 (x86_64)
+  NitroEnclaveHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      IamInstanceProfile: !Ref NitroEnclaveInstanceProfile
+      SubnetId: !Ref NitroPrivateSubnet
+      SecurityGroupIds:
+        - !Ref NitroEnclaveSecurityGroup
+      EnclaveOptions:
+        Enabled: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            Encrypted: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee /var/log/nitro-enclave-bootstrap.log | logger -t nitro-bootstrap -s 2>/dev/console) 2>&1
+
+          dnf -y update
+          dnf -y install docker aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel
+
+          systemctl enable docker
+          systemctl start docker
+
+          # Allocator: reserve at least 2 vCPUs + 256 MiB for the enclave
+          mkdir -p /etc/nitro_enclaves
+          printf '%s\n' '---' "memory_mib: ${EnclaveMemoryMiB}" "cpu_count: ${EnclaveCpuCount}" \
+            > /etc/nitro_enclaves/allocator.yaml
+
+          systemctl enable nitro-enclaves-allocator.service
+          systemctl restart nitro-enclaves-allocator.service
+          systemctl enable nitro-enclaves-vsock-proxy.service || true
+
+          # Verify CLI is present (EIF build / run happens in a later step)
+          nitro-cli --version || true
+          echo "Nitro Enclave host bootstrap complete (allocator cpu=${EnclaveCpuCount} mem=${EnclaveMemoryMiB}MiB)"
+      Tags:
+        - Key: Name
+          Value: !Sub agent-wallet-nitro-enclave-${Environment}
+        - Key: Project
+          Value: agent-wallet
+        - Key: Component
+          Value: nitro-enclave-signer
+
+Outputs:
+  NitroEnclaveInstanceId:
+    Description: EC2 instance ID of the Nitro Enclave signing host
+    Value: !Ref NitroEnclaveHost
+    Export:
+      Name: !Sub agent-wallet-${Environment}-nitro-instance-id
+
+  NitroEnclavePrivateIp:
+    Description: Private IP of the Nitro Enclave host (VPC-only reachability)
+    Value: !GetAtt NitroEnclaveHost.PrivateIp
+    Export:
+      Name: !Sub agent-wallet-${Environment}-nitro-private-ip
+
+  NitroEnclaveInstanceRoleArn:
+    Description: Instance role ARN — sole IAM principal with kms:Sign on the signing key
+    Value: !GetAtt NitroEnclaveInstanceRole.Arn
+    Export:
+      Name: !Sub agent-wallet-${Environment}-nitro-role-arn
+
+  NitroVpcId:
+    Description: VPC for enclave host (peer or attach API Lambdas here)
+    Value: !Ref NitroVpc
+
+  NitroPrivateSubnetId:
+    Description: Private subnet hosting the enclave EC2
+    Value: !Ref NitroPrivateSubnet
+
+  NitroEnclaveSecurityGroupId:
+    Description: Security group (inbound from VPC CIDR only)
+    Value: !Ref NitroEnclaveSecurityGroup
+
+  SigningServicePort:
+    Description: TCP port reserved for the future parent→enclave signing API
+    Value: !Ref SigningServicePort

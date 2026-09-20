@@ -1,0 +1,10 @@
+{
+  "KeyId": "EXAMPLE",
+  "Description": "Example KMS key policy condition fragment — bind Sign to this enclave image PCR0",
+  "Comment": "Replace PCR0_HEX with the value printed by enclave-app/build-enclave.sh (pcr0.txt). Attach under the NitroEnclaveInstanceRole allow statement.",
+  "ConditionExample": {
+    "StringEqualsIgnoreCase": {
+      "kms:RecipientAttestation:PCR0": "PCR0_HEX_FROM_pcr0.txt"
+    }
+  }
+}

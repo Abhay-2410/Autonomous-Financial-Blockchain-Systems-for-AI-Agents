@@ -1,0 +1,43 @@
+{
+  "": {
+    "entityTypes": {
+      "Agent": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "status": { "type": "String" },
+            "dailyLimit": { "type": "Long" },
+            "perTransactionLimit": { "type": "Long" },
+            "allowedMerchants": {
+              "type": "Set",
+              "element": { "type": "String" }
+            }
+          }
+        }
+      },
+      "Transaction": {
+        "shape": {
+          "type": "Record",
+          "attributes": {
+            "amount": { "type": "Long" },
+            "merchant": { "type": "String" }
+          }
+        }
+      }
+    },
+    "actions": {
+      "authorizeTransaction": {
+        "appliesTo": {
+          "principalTypes": ["Agent"],
+          "resourceTypes": ["Transaction"],
+          "context": {
+            "type": "Record",
+            "attributes": {
+              "remainingDailyBudget": { "type": "Long" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
