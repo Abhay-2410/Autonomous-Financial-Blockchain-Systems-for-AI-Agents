@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ErrorBanner,
   formatUsd,
   LoadingBlock,
   PageHeader,
 } from "../components/ui";
+import { OnboardingWalkthrough } from "../components/OnboardingWalkthrough";
 import {
   ApiError,
   getHome,
@@ -16,7 +18,9 @@ import {
 } from "../lib/api";
 import { usePendingApprovals } from "../lib/usePendingApprovals";
 
-export default function HomePage() {
+function HomeContent() {
+  const search = useSearchParams();
+  const forceTour = search.get("tour") === "1";
   const [data, setData] = useState<HomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { count: pendingApprovals } = usePendingApprovals({ pollMs: 3000 });
@@ -51,6 +55,8 @@ export default function HomePage() {
         title="Home"
         description="Your treasury funds prepaid agent cards. Every payment is policy-checked before it’s signed."
       />
+
+      <OnboardingWalkthrough forceOpen={forceTour} />
 
       {error && <ErrorBanner message={error} />}
 
@@ -189,5 +195,13 @@ export default function HomePage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<LoadingBlock label="Opening your wallet…" />}>
+      <HomeContent />
+    </Suspense>
   );
 }

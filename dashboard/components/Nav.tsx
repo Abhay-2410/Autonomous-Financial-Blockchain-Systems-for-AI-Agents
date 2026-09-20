@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { reopenOnboarding } from "../lib/onboarding";
 
 const LINKS = [
   { href: "/", label: "Home", hint: "Balance" },
@@ -89,6 +90,16 @@ export function Nav() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
     router.refresh();
+  }
+
+  function openTour() {
+    reopenOnboarding();
+    if (pathname === "/") {
+      router.replace("/?tour=1");
+      router.refresh();
+    } else {
+      router.push("/?tour=1");
+    }
   }
 
   async function resendVerification() {
@@ -190,6 +201,15 @@ export function Nav() {
               )}
             </span>
           )}
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d5ddd8] text-sm font-semibold text-[#5c6b63] transition hover:border-[#0d7a5f] hover:bg-[#e6f5ef] hover:text-[#0d7a5f]"
+            aria-label="Show getting-started guide"
+            title="Getting started"
+            onClick={openTour}
+          >
+            ?
+          </button>
           <button type="button" className="btn-secondary !px-3 !py-1.5 text-xs" onClick={logout}>
             Sign out
           </button>

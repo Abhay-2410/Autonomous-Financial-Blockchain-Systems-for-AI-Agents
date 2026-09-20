@@ -211,6 +211,10 @@ export default function PayPage() {
 
           <label className="block">
             <span className="label">Amount (USD)</span>
+            <p className="mb-2 text-xs leading-relaxed text-[#5c6b63]">
+              Payments within an agent&apos;s limits settle instantly. Over-limit
+              requests go to Approvals for your review.
+            </p>
             <input
               type="number"
               min={1}

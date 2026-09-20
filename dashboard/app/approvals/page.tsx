@@ -62,8 +62,8 @@ export default function ApprovalsPage() {
 
       {pending.length === 0 ? (
         <EmptyState
-          title="You’re all caught up"
-          description="There’s nothing waiting for approval. When an agent needs a human decision, it’ll appear here."
+          title="No payments waiting"
+          description="Requests appear here when an agent tries to spend beyond its daily or per-transaction limit."
         />
       ) : (
         <div className="space-y-4">
