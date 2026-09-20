@@ -1,0 +1,19 @@
+[Unit]
+Description=LimitX Nitro Enclaves vsock-proxy (KMS only)
+Documentation=file:///opt/limitx/parent/vsock-proxy.yaml
+After=network-online.target nitro-enclaves-allocator.service
+Wants=network-online.target
+Requires=nitro-enclaves-allocator.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/limitx/enclave.env
+Environment=AWS_REGION=eu-north-1
+ExecStart=/bin/bash -c 'exec /usr/bin/vsock-proxy 8000 kms.${AWS_REGION}.amazonaws.com 443 --config /opt/limitx/parent/vsock-proxy.yaml'
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

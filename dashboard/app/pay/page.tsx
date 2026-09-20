@@ -9,6 +9,7 @@ import {
 } from "../../components/ui";
 import {
   ApiError,
+  completePravaCheckout,
   listMerchants,
   listWallets,
   payAsOwner,
@@ -25,9 +26,11 @@ export default function PayPage() {
   const [amount, setAmount] = useState("25");
   const [recipient, setRecipient] = useState("");
   const [purpose, setPurpose] = useState("Everyday purchase");
+  const [rail, setRail] = useState<"stellar" | "chain" | "prava">("stellar");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PayResult | null>(null);
   const [sending, setSending] = useState(false);
+  const [completingPrava, setCompletingPrava] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const selected = useMemo(
@@ -84,6 +87,7 @@ export default function PayPage() {
         type: "purchase",
         purpose,
         timestamp: new Date().toISOString(),
+        settlementRail: rail,
       });
       setResult(res);
     } catch (err) {
@@ -93,15 +97,38 @@ export default function PayPage() {
     }
   }
 
+  async function onCompletePrava() {
+    if (!result?.transactionId) return;
+    setCompletingPrava(true);
+    setError(null);
+    try {
+      await completePravaCheckout(result.transactionId);
+      setResult({
+        ...result,
+        status: "CONFIRMED",
+        decision: result.decision,
+      });
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not complete Prava checkout."
+      );
+    } finally {
+      setCompletingPrava(false);
+    }
+  }
+
   if (loading) return <LoadingBlock label="Preparing pay…" />;
 
   const merchant = merchants.find((m) => m.id === recipient);
+  const prava = result?.pravaCheckout;
 
   return (
     <div>
       <PageHeader
         title="Pay"
-        description="Send money from an agent’s prepaid wallet. Policy decides allow, ask you, or block — then LimitX signs."
+        description="Policy decides allow / ask / block. Then LimitX signs and settles on Stellar Testnet (XLM), Base stub, or Prava card."
       />
 
       {error && <ErrorBanner message={error} />}
@@ -132,8 +159,56 @@ export default function PayPage() {
             )}
           </label>
 
+          <fieldset className="block">
+            <span className="label">Settlement rail</span>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="rail"
+                  checked={rail === "stellar"}
+                  onChange={() => setRail("stellar")}
+                />
+                Stellar Testnet (XLM)
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="rail"
+                  checked={rail === "chain"}
+                  onChange={() => setRail("chain")}
+                />
+                Base Sepolia (stub)
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="rail"
+                  checked={rail === "prava"}
+                  onChange={() => setRail("prava")}
+                />
+                Prava card checkout
+              </label>
+            </div>
+            {rail === "stellar" && (
+              <p className="mt-2 text-xs text-[#5c6b63]">
+                Custodial Stellar account pays native XLM on Testnet (Friendbot-funded).
+                Amount is in XLM.
+              </p>
+            )}
+            {rail === "prava" && (
+              <p className="mt-2 text-xs text-[#5c6b63]">
+                After policy allow + KMS sign, open Prava’s hosted page to approve
+                a one-time merchant-scoped Visa credential (passkey). Requires{" "}
+                <code className="font-mono">PRAVA_SECRET_KEY</code> on the API.
+              </p>
+            )}
+          </fieldset>
+
           <label className="block">
-            <span className="label">Amount (USD / USDC)</span>
+            <span className="label">
+              Amount ({rail === "stellar" ? "XLM" : "USD / USDC"})
+            </span>
             <input
               type="number"
               min={1}
@@ -161,7 +236,13 @@ export default function PayPage() {
             </select>
             {merchant && (
               <span className="mt-1.5 block font-mono text-xs text-[#8a968e]">
-                Payout {shortAddress(merchant.address)}
+                Payout{" "}
+                {shortAddress(
+                  rail === "stellar"
+                    ? merchant.stellarAddress ?? merchant.address
+                    : merchant.address
+                )}
+                {merchant.url ? ` · ${merchant.url}` : ""}
               </span>
             )}
           </label>
@@ -186,9 +267,10 @@ export default function PayPage() {
           <div className="card p-5">
             <h2 className="text-base font-semibold">How it works</h2>
             <ol className="mt-3 list-decimal space-y-2 pl-4 text-sm text-[#5c6b63]">
-              <li>Policy checks limits & merchants</li>
+              <li>Policy checks limits &amp; merchants</li>
               <li>Soft overspend → Approvals inbox</li>
-              <li>Allowed → KMS sign → stub settle on Base Sepolia</li>
+              <li>Allowed → KMS sign (Lambda or Nitro)</li>
+              <li>Settle: Stellar Testnet XLM, Base stub, or Prava card</li>
             </ol>
           </div>
 
@@ -201,9 +283,51 @@ export default function PayPage() {
               <p className="mt-1 text-sm text-[#5c6b63]">
                 {result.reasons.map((r) => r.replace(/_/g, " ")).join(" · ")}
               </p>
+              <p className="mt-1 text-xs text-[#8a968e]">
+                Rail: {result.settlementRail ?? rail}
+                {result.status ? ` · ${result.status}` : ""}
+              </p>
               <p className="mt-3 font-mono text-xs text-[#8a968e]">
                 {result.transactionId}
               </p>
+
+              {prava && (
+                <div className="mt-4 space-y-2 rounded-lg bg-[#f4f7f5] p-3 text-sm">
+                  <p className="font-medium text-[#14201a]">Prava checkout</p>
+                  {!prava.configured || !prava.iframeUrl ? (
+                    <p className="text-[#5c6b63]">
+                      {prava.message ??
+                        "Set PRAVA_SECRET_KEY on the API stack, then redeploy."}
+                    </p>
+                  ) : (
+                    <>
+                      <a
+                        href={prava.iframeUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-primary inline-flex text-sm"
+                      >
+                        Open Prava hosted checkout
+                      </a>
+                      <button
+                        type="button"
+                        className="btn-secondary ml-2 text-sm"
+                        disabled={completingPrava}
+                        onClick={() => void onCompletePrava()}
+                      >
+                        {completingPrava
+                          ? "Confirming…"
+                          : "I’ve finished — confirm"}
+                      </button>
+                      <p className="text-xs text-[#8a968e]">
+                        Sandbox test OTP is usually <code>456789</code>. Card
+                        numbers never touch LimitX.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div className="mt-4 flex flex-wrap gap-2">
                 {result.decision === "PENDING_APPROVAL" && (
                   <Link href="/approvals" className="btn-primary text-sm">

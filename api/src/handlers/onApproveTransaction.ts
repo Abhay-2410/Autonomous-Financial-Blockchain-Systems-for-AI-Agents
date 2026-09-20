@@ -1,16 +1,16 @@
 /**
- * Step Functions OnApprove — apply spend, KMS sign, stub network confirm.
+ * Step Functions OnApprove — apply spend, KMS sign, then chain stub or Prava.
  */
 import type { Handler } from "aws-lambda";
 import { applyAllowedTransaction } from "../lib/applyAllowedTransaction";
-import { getAgentById, getItem } from "../lib/dynamo";
+import { getAgentById, getItem, updateItem } from "../lib/dynamo";
 import { Keys, type AgentWallet, type Transaction } from "../lib/schema";
-import { updateItem } from "../lib/dynamo";
+import { startPravaCheckoutForTransaction } from "../lib/startPravaCheckout";
 import type { ApprovalWorkflowInput } from "../lib/startApprovalWorkflow";
 
 export const handler: Handler<
   ApprovalWorkflowInput,
-  { ok: true; status: string }
+  { ok: true; status: string; pravaSessionId?: string }
 > = async (event) => {
   const agent = await getAgentById(event.agentId);
   if (!agent) {
@@ -28,6 +28,13 @@ export const handler: Handler<
       `Transaction ${event.transactionId} is not PENDING_APPROVAL`
     );
   }
+
+  const rail =
+    txn.settlementRail === "prava" ||
+    (txn.metadata as { settlementRail?: string } | undefined)?.settlementRail ===
+      "prava"
+      ? "prava"
+      : "chain";
 
   const allowed =
     (await updateItem<Transaction>({
@@ -48,7 +55,18 @@ export const handler: Handler<
     amount: event.amount,
     recipient: event.recipient,
     timestamp: event.timestamp,
+    settlementRail: rail,
   });
 
-  return { ok: true, status: applied.transaction.status };
+  let pravaSessionId: string | undefined;
+  if (rail === "prava") {
+    const checkout = await startPravaCheckoutForTransaction(applied.transaction);
+    pravaSessionId = checkout.sessionId;
+  }
+
+  return {
+    ok: true,
+    status: applied.transaction.status,
+    pravaSessionId,
+  };
 };

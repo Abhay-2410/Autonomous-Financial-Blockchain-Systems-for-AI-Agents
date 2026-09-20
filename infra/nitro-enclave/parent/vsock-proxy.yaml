@@ -1,0 +1,13 @@
+# Nitro Enclaves vsock-proxy allowlist — PARENT INSTANCE ONLY.
+#
+# Enclave outbound is exclusively:
+#   vsock → vsock-proxy → kms.<AWS_REGION>.amazonaws.com:443
+#
+# No other destinations. deploy.sh rewrites the address for your region.
+#
+# Start:
+#   vsock-proxy 8000 kms.eu-north-1.amazonaws.com 443 \
+#     --config /opt/limitx/parent/vsock-proxy.yaml
+
+allow_list:
+  - { address: kms.eu-north-1.amazonaws.com, port: 443 }

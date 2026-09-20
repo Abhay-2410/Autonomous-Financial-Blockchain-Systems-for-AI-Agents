@@ -90,7 +90,7 @@ export async function runSeed(): Promise<void> {
     status: "ACTIVE",
     dailyLimit: 5000,
     perTransactionLimit: 2000,
-    allowedMerchants: ["Amazon", "Flipkart"],
+    allowedMerchants: ["Amazon", "Flipkart", "DemoStore"],
     spentToday: 0,
     spentTodayDate: TODAY,
     apiKey: "shopping-bot-secret",

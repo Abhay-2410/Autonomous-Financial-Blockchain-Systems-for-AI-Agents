@@ -89,7 +89,7 @@ export default function WalletsPage() {
     <div>
       <PageHeader
         title="Agent cards"
-        description="Each AI agent gets a prepaid blockchain wallet with daily limits and allowed merchants — like a spending card."
+        description="Each AI agent gets a prepaid wallet with daily limits and merchants. Run agents/shopping_agent.py (demo / browser / Prava) to spend through LimitX."
         action={
           <button type="button" onClick={() => void load()} className="btn-secondary">
             Refresh

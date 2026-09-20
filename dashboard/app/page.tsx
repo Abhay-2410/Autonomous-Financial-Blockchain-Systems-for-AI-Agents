@@ -59,13 +59,26 @@ export default function HomePage() {
                 {data.orgName} · {data.treasury.chainName}
               </p>
               <p className="mt-2 font-display text-4xl font-bold tracking-tight sm:text-5xl">
-                ${data.treasury.balance.toLocaleString()}
+                {data.treasury.tokenSymbol === "XLM" ? (
+                  <>
+                    {data.treasury.balance.toLocaleString(undefined, {
+                      maximumFractionDigits: 4,
+                    })}{" "}
+                    <span className="text-2xl font-semibold sm:text-3xl">
+                      XLM
+                    </span>
+                  </>
+                ) : (
+                  <>${data.treasury.balance.toLocaleString()}</>
+                )}
               </p>
               <p className="mt-1 text-sm text-white/75">
                 {data.treasury.tokenSymbol} treasury · settlement{" "}
                 {data.treasury.settlementMode === "stub"
                   ? "demo (stub chain)"
-                  : "live"}
+                  : data.treasury.settlementMode === "stellar-testnet"
+                    ? "Stellar Testnet"
+                    : "live"}
               </p>
               <a
                 href={data.treasury.explorerUrl}

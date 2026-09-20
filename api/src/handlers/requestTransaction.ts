@@ -4,6 +4,7 @@ import {
   applyAllowedTransaction,
   DailyLimitRaceError,
 } from "../lib/applyAllowedTransaction";
+import { resolveOwnerAuth } from "../lib/authContext";
 import {
   getAgentById,
   putItem,
@@ -18,6 +19,7 @@ import {
   type Transaction,
 } from "../lib/schema";
 import { startApprovalWorkflow } from "../lib/startApprovalWorkflow";
+import { startPravaCheckoutForTransaction } from "../lib/startPravaCheckout";
 import { authorizeTransaction } from "./authorizeTransaction";
 
 interface TransactionRequestBody {
@@ -28,6 +30,8 @@ interface TransactionRequestBody {
   purpose: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
+  /** chain = Base stub; prava = card; stellar = Testnet XLM (default) */
+  settlementRail?: "chain" | "prava" | "stellar";
 }
 
 function parseBody(raw: string | undefined): TransactionRequestBody | null {
@@ -44,6 +48,13 @@ function parseBody(raw: string | undefined): TransactionRequestBody | null {
     ) {
       return null;
     }
+    const metaRail = (parsed.metadata as { settlementRail?: string } | undefined)
+      ?.settlementRail;
+    const railRaw = parsed.settlementRail ?? metaRail;
+    const settlementRail =
+      railRaw === "prava" || railRaw === "chain" || railRaw === "stellar"
+        ? railRaw
+        : "stellar";
     return {
       agentId: parsed.agentId,
       amount: parsed.amount,
@@ -52,6 +63,7 @@ function parseBody(raw: string | undefined): TransactionRequestBody | null {
       purpose: parsed.purpose,
       timestamp: parsed.timestamp,
       metadata: parsed.metadata,
+      settlementRail,
     };
   } catch {
     return null;
@@ -65,26 +77,8 @@ function extractApiKey(event: {
   const lower = Object.fromEntries(
     Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])
   );
-  return lower["x-api-key"] ?? lower["authorization"]?.replace(/^Bearer\s+/i, "");
-}
-
-function extractOwnerKey(event: {
-  headers?: Record<string, string | undefined>;
-}): string | undefined {
-  const headers = event.headers ?? {};
-  const lower = Object.fromEntries(
-    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])
-  );
-  return lower["x-owner-key"];
-}
-
-function isOwnerAuthenticated(event: {
-  headers?: Record<string, string | undefined>;
-}): boolean {
-  const expected = process.env.OWNER_API_KEY;
-  if (!expected) return false;
-  const presented = extractOwnerKey(event);
-  return Boolean(presented && presented === expected);
+  // Prefer x-api-key so Bearer session JWTs are not treated as agent secrets.
+  return lower["x-api-key"];
 }
 
 async function maybeStartApproval(
@@ -112,7 +106,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
   agent = await resetSpentTodayIfNeeded(agent);
   const apiKey = extractApiKey(event);
-  const ownerAuthenticated = isOwnerAuthenticated(event);
+  const ownerAuth = resolveOwnerAuth(event);
+  const ownerAuthenticated = Boolean(ownerAuth);
+
+  if (
+    ownerAuth?.kind === "session" &&
+    agent.walletId !== ownerAuth.walletId
+  ) {
+    return json(403, { message: "That agent card is not on your account." });
+  }
 
   let auth = await authorizeTransaction({
     agent,
@@ -134,9 +136,14 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     status: auth.decision,
     reason: auth.reasons.join(","),
     reasons: auth.reasons,
-    metadata: body.metadata,
+    metadata: {
+      ...(body.metadata ?? {}),
+      settlementRail: body.settlementRail ?? "chain",
+    },
   });
 
+  // Persist intended rail early (approvals path reads it later).
+  txn.settlementRail = body.settlementRail ?? "chain";
   await putItem(txn);
 
   if (auth.decision === "DENIED" || auth.decision === "PENDING_APPROVAL") {
@@ -171,6 +178,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         amount: body.amount,
         recipient: body.recipient,
         timestamp: body.timestamp,
+        settlementRail: body.settlementRail ?? "chain",
       });
       txn = applied.transaction;
     } catch (err) {
@@ -204,11 +212,25 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
   const executionArn = await maybeStartApproval(agent, txn, auth.decision);
 
+  let pravaCheckout: Awaited<
+    ReturnType<typeof startPravaCheckoutForTransaction>
+  > | null = null;
+  if (
+    auth.decision === "ALLOWED" &&
+    body.settlementRail === "prava" &&
+    (txn.status === "SIGNED" || txn.reason === "SIGNED_AWAITING_PRAVA")
+  ) {
+    pravaCheckout = await startPravaCheckoutForTransaction(txn);
+  }
+
   return json(200, {
     transactionId,
     decision: auth.decision,
     reasons: auth.reasons,
     failedCheck: auth.failedCheck,
     approvalExecutionArn: executionArn,
+    settlementRail: body.settlementRail ?? "chain",
+    status: txn.status,
+    pravaCheckout,
   });
 };

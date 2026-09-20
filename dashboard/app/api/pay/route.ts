@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSessionToken } from "../../../lib/auth";
 
 const API_BASE = (
   process.env.NEXT_PUBLIC_API_URL ??
@@ -8,15 +9,22 @@ const API_BASE = (
 const OWNER_KEY =
   process.env.OWNER_API_KEY ?? "limitx-owner-demo-key";
 
-/** Proxy Pay → API Gateway with server-side owner key (not exposed to the browser). */
+/** Proxy Pay → API Gateway with session JWT (or legacy owner key). */
 export async function POST(req: Request) {
   const body = await req.text();
+  const token = await getSessionToken();
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  } else {
+    headers["x-owner-key"] = OWNER_KEY;
+  }
+
   const res = await fetch(`${API_BASE}/transactions`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-owner-key": OWNER_KEY,
-    },
+    headers,
     body,
   });
   const text = await res.text();

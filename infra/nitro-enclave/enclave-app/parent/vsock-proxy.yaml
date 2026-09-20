@@ -1,13 +1,7 @@
-# Allowlist for nitro-enclaves-vsock-proxy (parent instance).
-# Relays enclave vsock:8000 → KMS TLS endpoint (enclave has no network NIC).
+# Moved — canonical parent host files live in:
+#   infra/nitro-enclave/parent/
 #
-# Start on parent:
-#   vsock-proxy 8000 kms.eu-north-1.amazonaws.com 443 \
-#     --config /etc/nitro_enclaves/vsock-proxy.yaml
-#
-# Adjust region to match AWS_REGION / stack region.
-
+# This path is kept so older docs that linked here still resolve.
+# See ../parent/vsock-proxy.yaml
 allow_list:
   - { address: kms.eu-north-1.amazonaws.com, port: 443 }
-  - { address: kms.us-east-1.amazonaws.com, port: 443 }
-  - { address: kms.eu-west-1.amazonaws.com, port: 443 }

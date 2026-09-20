@@ -10,6 +10,7 @@ import {
 } from "./dynamo";
 import { invokeSignTransaction } from "./invokeSignTransaction";
 import { submitToNetwork } from "../handlers/submitToNetwork";
+import { submitStellarPayment } from "./submitStellarPayment";
 import { emitTransactionAllowed } from "./events";
 import {
   Keys,
@@ -35,6 +36,8 @@ export interface ApplyAllowedTransactionInput {
   amount: number;
   recipient: string;
   timestamp: string;
+  /** Default chain stub; prava = card; stellar = Testnet XLM. */
+  settlementRail?: "chain" | "prava" | "stellar";
 }
 
 export interface ApplyAllowedTransactionResult {
@@ -54,7 +57,9 @@ export interface ApplyAllowedTransactionResult {
 export async function applyAllowedTransaction(
   input: ApplyAllowedTransactionInput
 ): Promise<ApplyAllowedTransactionResult> {
-  const { agent, transaction, amount, recipient, timestamp } = input;
+  const { agent, transaction, amount, recipient, timestamp, settlementRail } =
+    input;
+  const rail = settlementRail ?? "chain";
   const agentKeys = Keys.agentWallet(agent.walletId, agent.agentId);
   const maxSpentBefore = agent.dailyLimit - amount;
 
@@ -139,17 +144,47 @@ export async function applyAllowedTransaction(
     finalTxn.signedAt = signed.signedAt;
     finalTxn.signingAlgorithm = signed.signingAlgorithm;
     finalTxn.reason = "SIGNED";
+    finalTxn.settlementRail = rail;
 
-    // Demo stub settlement — SUBMITTED → CONFIRMED (not a real chain).
-    const confirmed = await submitToNetwork({
-      agentId: finalTxn.agentId,
-      timestamp: finalTxn.timestamp,
-      txnId: finalTxn.txnId,
-    });
-    finalTxn.status = "CONFIRMED";
-    finalTxn.txHash = confirmed.txHash;
-    finalTxn.confirmedAt = confirmed.confirmedAt;
-    finalTxn.reason = "CONFIRMED";
+    if (rail === "prava") {
+      // Fiat card rail: persist rail marker; Prava hosted checkout is started
+      // by requestTransaction after this returns.
+      await updateItem<Transaction>({
+        keys: txnKeys,
+        set: ["settlementRail = :rail", "reason = :reason"],
+        expressionAttributeValues: {
+          ":rail": "prava",
+          ":reason": "SIGNED_AWAITING_PRAVA",
+        },
+      });
+      finalTxn.reason = "SIGNED_AWAITING_PRAVA";
+    } else if (rail === "stellar") {
+      const confirmed = await submitStellarPayment({
+        agentId: finalTxn.agentId,
+        timestamp: finalTxn.timestamp,
+        txnId: finalTxn.txnId,
+      });
+      finalTxn.status = "CONFIRMED";
+      finalTxn.txHash = confirmed.txHash;
+      finalTxn.confirmedAt = confirmed.confirmedAt;
+      finalTxn.explorerUrl = confirmed.explorerUrl;
+      finalTxn.reason = "CONFIRMED_STELLAR";
+      finalTxn.settlementRail = "stellar";
+      finalTxn.tokenSymbol = "XLM";
+      finalTxn.chainId = confirmed.chainId;
+    } else {
+      // Demo stub settlement — SUBMITTED → CONFIRMED (not a real chain).
+      const confirmed = await submitToNetwork({
+        agentId: finalTxn.agentId,
+        timestamp: finalTxn.timestamp,
+        txnId: finalTxn.txnId,
+      });
+      finalTxn.status = "CONFIRMED";
+      finalTxn.txHash = confirmed.txHash;
+      finalTxn.confirmedAt = confirmed.confirmedAt;
+      finalTxn.reason = "CONFIRMED";
+      finalTxn.settlementRail = "chain";
+    }
   }
 
   const updatedAgent: AgentWallet = {

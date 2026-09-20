@@ -69,7 +69,7 @@ export async function submitToNetwork(
   }
 
   const agent = await getAgentById(txn.agentId);
-  const merchant = getMerchantByName(txn.recipient);
+  const merchant = await getMerchantByName(txn.recipient);
   const fromAddress = agent?.address;
   const toAddress = merchant?.address;
   const chainId = agent?.chainId ?? DEMO_CHAIN.chainId;

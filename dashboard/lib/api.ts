@@ -110,8 +110,46 @@ export interface Merchant {
   name: string;
   category: string;
   address: string;
+  stellarAddress?: string;
   chainId: number;
   tokenSymbol: string;
+  url?: string;
+}
+
+export interface PayResult {
+  transactionId: string;
+  decision: string;
+  reasons: string[];
+  failedCheck?: number;
+  approvalExecutionArn?: string | null;
+  settlementRail?: "chain" | "prava" | "stellar";
+  status?: string;
+  pravaCheckout?: {
+    configured: boolean;
+    sessionId?: string;
+    orderId?: string | null;
+    iframeUrl?: string;
+    expiresAt?: string;
+    message?: string;
+  } | null;
+}
+
+export interface PravaStatusResult {
+  configured: boolean;
+  transactionId: string;
+  agentId?: string | null;
+  limitxStatus?: string | null;
+  pravaLocalStatus?: string | null;
+  iframeUrl?: string | null;
+  prava?: {
+    sessionId: string;
+    orderId: string | null;
+    status: string;
+    merchantStatus: string | null;
+    hasCredentials: boolean;
+    error: { code: string; message: string } | null;
+  };
+  message?: string;
 }
 
 export interface PendingApproval {
@@ -150,20 +188,12 @@ export interface PolicyResponse {
   } | null;
 }
 
-export interface PayResult {
-  transactionId: string;
-  decision: string;
-  reasons: string[];
-  failedCheck?: number;
-  approvalExecutionArn?: string | null;
-}
-
 export function getApiBase(): string {
   return API_BASE;
 }
 
 export function getHome() {
-  return request<HomeSummary>("/home");
+  return request<HomeSummary>("/api/home");
 }
 
 export function listMerchants() {
@@ -171,7 +201,7 @@ export function listMerchants() {
 }
 
 export function listWallets() {
-  return request<{ wallets: AgentWallet[]; count: number }>("/wallets");
+  return request<{ wallets: AgentWallet[]; count: number }>("/api/wallets");
 }
 
 export function patchWallet(
@@ -207,10 +237,29 @@ export function payAsOwner(body: {
   type: string;
   purpose: string;
   timestamp: string;
+  settlementRail?: "chain" | "prava" | "stellar";
 }) {
   return request<PayResult>("/api/pay", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export function getPravaStatus(transactionId: string) {
+  return request<PravaStatusResult>(
+    `/api/prava/status?transactionId=${encodeURIComponent(transactionId)}`
+  );
+}
+
+export function completePravaCheckout(transactionId: string) {
+  return request<{
+    transactionId: string;
+    status: string;
+    settlementRail: string;
+    confirmedAt: string;
+  }>("/api/prava/complete", {
+    method: "POST",
+    body: JSON.stringify({ transactionId }),
   });
 }
 
@@ -249,6 +298,10 @@ export function getAudit(params?: { agentId?: string; limit?: number }) {
 }
 
 export function shortAddress(addr?: string): string {
-  if (!addr || addr.length < 12) return addr ?? "—";
+  if (!addr) return "—";
+  if (addr.startsWith("G") && addr.length >= 12) {
+    return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
+  }
+  if (addr.length < 12) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }

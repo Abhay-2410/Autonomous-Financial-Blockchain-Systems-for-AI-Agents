@@ -1,14 +1,13 @@
 /**
- * Transaction signer Lambda (orchestration only in production).
+ * Transaction signer Lambda (SIGNING_MODE=lambda-kms — Prompt 7 / Free Tier).
  *
- * Production path: Nitro Enclave on EC2 (infra/nitro-enclave/).
- * That instance role is the ONLY IAM principal granted kms:Sign and
- * kms:DescribeKey on the secp256k1 TransactionSigningKey. This Lambda's
- * execution role intentionally has no KMS sign permissions — call the
- * enclave host over the VPC (private IP / port 8443) once the EIF is running.
+ * Default path when SIGNING_MODE=lambda-kms (or unset). Signs in-process with
+ * KMS using SignTransactionExecutionRole. Flip callers to
+ * SIGNING_MODE=nitro-enclave to use authorizeAndSignViaEnclave instead.
  *
- * Hackathon note: the in-process KMS Sign below still works only if you
- * temporarily re-attach kms:Sign for local demos; the SAM template does not.
+ * When EnclaveImageSha384 is configured on the stack, the key policy also
+ * contains SignOnlyWithEnclaveImageAttestation (PCR0 / ImageSha384). The Lambda
+ * Allow (SignLambdaKmsDemoFallback) is the live-demo escape hatch only.
  */
 
 import { KMSClient, SignCommand } from "@aws-sdk/client-kms";

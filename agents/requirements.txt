@@ -1,2 +1,10 @@
-# Strands Agents SDK — pin when integrating
-strands-agents>=0.1.0
+# Shopping / travel / Strands demo agents
+requests>=2.32.0
+python-dotenv>=1.0.0
+playwright>=1.49.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Strands + Bedrock (Prompt: shopping_agent_strands / vendor_agent_compromised)
+strands-agents>=1.0.0
+boto3>=1.35.0

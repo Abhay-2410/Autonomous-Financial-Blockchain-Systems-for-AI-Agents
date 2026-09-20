@@ -17,6 +17,6 @@ resolve_s3 = true
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 confirm_changeset = false
 region = "eu-north-1"
-parameter_overrides = "Environment=dev"
+parameter_overrides = "Environment=dev SigningMode=lambda-kms"
 image_repositories = []
 disable_rollback = false

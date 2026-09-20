@@ -1,40 +1,62 @@
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
-import { ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { resolveOwnerAuth } from "../lib/authContext";
 import { DEMO_CHAIN, explorerAddressUrl } from "../lib/chain";
 import {
   docClient,
   getTableName,
   listPendingApprovalTransactions,
 } from "../lib/dynamo";
+import { ensureAgentStellar, ensureParentStellar } from "../lib/ensureStellar";
 import { json } from "../lib/http";
 import type { AgentWallet, ParentWallet } from "../lib/schema";
+import {
+  explorerAccountUrl,
+  getXlmBalance,
+  STELLAR,
+} from "../lib/stellar";
 
 /**
- * GET /home — payments-app summary: treasury, agents, pending count.
+ * GET /home — payments-app summary for the signed-in owner's wallet.
+ * Authorization: Bearer <session> (or x-owner-key for legacy server proxy).
  */
-export const handler: APIGatewayProxyHandlerV2 = async () => {
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+  const auth = resolveOwnerAuth(event);
+  if (!auth) {
+    return json(401, { message: "Sign in with your phone number." });
+  }
+
+  const walletId = auth.walletId;
   const result = await docClient.send(
-    new ScanCommand({
+    new QueryCommand({
       TableName: getTableName(),
-      FilterExpression: "entityType = :parent OR entityType = :agent",
+      KeyConditionExpression: "pk = :pk",
       ExpressionAttributeValues: {
-        ":parent": "ParentWallet",
-        ":agent": "AgentWallet",
+        ":pk": `WALLET#${walletId}`,
       },
     })
   );
 
   const items = result.Items ?? [];
-  const parent = items.find(
+  let parent = items.find(
     (i) => (i as ParentWallet).entityType === "ParentWallet"
   ) as ParentWallet | undefined;
 
-  const agents = (items as AgentWallet[])
+  let agents = (items as AgentWallet[])
     .filter((i) => i.entityType === "AgentWallet")
-    .map(({ apiKey: _k, ...rest }) => rest)
     .sort((a, b) => a.agentId.localeCompare(b.agentId));
 
-  const pending = await listPendingApprovalTransactions();
+  // Backfill Stellar Testnet accounts for wallets created before this rail.
+  if (parent) {
+    parent = await ensureParentStellar(parent);
+  }
+  agents = await Promise.all(agents.map((a) => ensureAgentStellar(a)));
+
+  const publicAgents = agents.map(({ apiKey: _k, stellarSecretEnc: _s, ...rest }) => rest);
+
+  const agentIds = new Set(agents.map((a) => a.agentId));
+  const pendingAll = await listPendingApprovalTransactions();
+  const pending = pendingAll.filter((t) => agentIds.has(t.agentId));
 
   const totalAllocated = agents.reduce(
     (sum, a) => sum + (a.allocatedBalance ?? a.dailyLimit),
@@ -42,21 +64,29 @@ export const handler: APIGatewayProxyHandlerV2 = async () => {
   );
   const totalSpentToday = agents.reduce((sum, a) => sum + a.spentToday, 0);
 
-  const treasuryAddress =
-    parent?.address ??
-    `0x${"0".repeat(40)}`;
+  const treasuryAddress = parent?.address ?? `0x${"0".repeat(40)}`;
+  const isStellar = treasuryAddress.startsWith("G");
+  const xlmBalance = isStellar ? await getXlmBalance(treasuryAddress) : null;
 
   return json(200, {
     orgName: parent?.orgName ?? "LimitX",
-    walletId: parent?.walletId ?? process.env.WALLET_ID ?? "org-limitx",
+    walletId,
+    phone: auth.phone ?? null,
     treasury: {
-      balance: parent?.balance ?? totalAllocated,
+      balance: xlmBalance ?? parent?.balance ?? totalAllocated,
       address: treasuryAddress,
-      explorerUrl: explorerAddressUrl(treasuryAddress),
-      chainId: parent?.chainId ?? DEMO_CHAIN.chainId,
-      chainName: parent?.chainName ?? DEMO_CHAIN.name,
-      tokenSymbol: parent?.tokenSymbol ?? DEMO_CHAIN.tokenSymbol,
-      settlementMode: DEMO_CHAIN.settlementMode,
+      explorerUrl: isStellar
+        ? explorerAccountUrl(treasuryAddress)
+        : explorerAddressUrl(treasuryAddress),
+      chainId: parent?.chainId ?? (isStellar ? STELLAR.chainId : DEMO_CHAIN.chainId),
+      chainName:
+        parent?.chainName ?? (isStellar ? STELLAR.chainName : DEMO_CHAIN.name),
+      tokenSymbol:
+        parent?.tokenSymbol ??
+        (isStellar ? STELLAR.tokenSymbol : DEMO_CHAIN.tokenSymbol),
+      settlementMode: isStellar
+        ? STELLAR.settlementMode
+        : DEMO_CHAIN.settlementMode,
     },
     totals: {
       agentCount: agents.length,
@@ -65,14 +95,14 @@ export const handler: APIGatewayProxyHandlerV2 = async () => {
       spentToday: totalSpentToday,
       pendingApprovals: pending.length,
     },
-    agents: agents.map((a) => ({
+    agents: publicAgents.map((a) => ({
       agentId: a.agentId,
       name: a.name,
       status: a.status,
       spentToday: a.spentToday,
       dailyLimit: a.dailyLimit,
       address: a.address,
-      tokenSymbol: a.tokenSymbol ?? DEMO_CHAIN.tokenSymbol,
+      tokenSymbol: a.tokenSymbol ?? STELLAR.tokenSymbol,
     })),
   });
 };

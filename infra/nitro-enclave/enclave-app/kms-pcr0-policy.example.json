@@ -1,8 +1,13 @@
 {
   "KeyId": "EXAMPLE",
-  "Description": "Example KMS key policy condition fragment — bind Sign to this enclave image PCR0",
-  "Comment": "Replace PCR0_HEX with the value printed by enclave-app/build-enclave.sh (pcr0.txt). Attach under the NitroEnclaveInstanceRole allow statement.",
+  "Description": "KMS key-policy fragment — bind kms:Sign to the enclave EIF PCR0",
+  "Comment": "Condition key per AWS docs: kms:RecipientAttestation:ImageSha384 (≡ PCR0). Replace PCR0_HEX with enclave-app/build-enclave.sh → pcr0.txt. This is the independently checkable line that requires a fresh Nitro attestation from that exact enclave image — even the EC2 instance role's IAM kms:Sign grant is useless without it. See Sid SignOnlyWithEnclaveImageAttestation in infra/template.yaml.",
   "ConditionExample": {
+    "StringEqualsIgnoreCase": {
+      "kms:RecipientAttestation:ImageSha384": "PCR0_HEX_FROM_pcr0.txt"
+    }
+  },
+  "EquivalentPcrForm": {
     "StringEqualsIgnoreCase": {
       "kms:RecipientAttestation:PCR0": "PCR0_HEX_FROM_pcr0.txt"
     }

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const LINKS = [
   { href: "/", label: "Home", hint: "Balance" },
@@ -13,6 +14,27 @@ const LINKS = [
 
 export function Nav() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [phone, setPhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pathname === "/login") return;
+    fetch("/api/auth/me")
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return r.json() as Promise<{ user?: { phone?: string } }>;
+      })
+      .then((data) => setPhone(data?.user?.phone ?? null))
+      .catch(() => setPhone(null));
+  }, [pathname]);
+
+  if (pathname === "/login") return null;
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#d5ddd8]/80 bg-white/80 backdrop-blur-md">
@@ -47,25 +69,35 @@ export function Nav() {
           })}
         </nav>
 
-        <nav className="ml-auto flex flex-wrap justify-end gap-1 md:hidden">
-          {LINKS.map((l) => {
-            const active =
-              l.href === "/"
-                ? pathname === "/"
-                : pathname === l.href || pathname.startsWith(`${l.href}/`);
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
-                  active ? "bg-[#e6f5ef] text-[#0d7a5f]" : "text-[#5c6b63]"
-                }`}
-              >
-                {l.label}
-              </Link>
-            );
-          })}
-        </nav>
+        <div className="ml-auto flex items-center gap-2">
+          <nav className="flex flex-wrap justify-end gap-1 md:hidden">
+            {LINKS.map((l) => {
+              const active =
+                l.href === "/"
+                  ? pathname === "/"
+                  : pathname === l.href || pathname.startsWith(`${l.href}/`);
+              return (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
+                    active ? "bg-[#e6f5ef] text-[#0d7a5f]" : "text-[#5c6b63]"
+                  }`}
+                >
+                  {l.label}
+                </Link>
+              );
+            })}
+          </nav>
+          {phone && (
+            <span className="hidden font-mono text-xs text-[#5c6b63] sm:inline">
+              {phone}
+            </span>
+          )}
+          <button type="button" className="btn-secondary !px-3 !py-1.5 text-xs" onClick={logout}>
+            Sign out
+          </button>
+        </div>
       </div>
     </header>
   );

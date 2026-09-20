@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  LimitX / agent-wallet — Nitro Enclave signing host (production path).
+  LimitX / agent-wallet - Nitro Enclave signing host (production path).
   Exclusive kms:Sign + kms:DescribeKey on the transaction signing key.
   Deploy after the main agent-wallet stack; pass SigningKeyArn from its outputs.
 
@@ -18,7 +18,7 @@ Parameters:
     Type: String
     Default: c5.xlarge
     AllowedValues: [c5.xlarge, m5.xlarge]
-    Description: Nitro Enclaves–capable instance type
+    Description: Nitro Enclaves-capable instance type
 
   EnclaveCpuCount:
     Type: Number
@@ -47,7 +47,7 @@ Parameters:
   SigningServicePort:
     Type: Number
     Default: 8443
-    Description: TCP port for VPC-internal signer API (parent → enclave via vsock later)
+    Description: TCP port for VPC-internal signer API (parent -> enclave via vsock later)
 
 Resources:
   # --- Network (private enclave host; NAT for package install / KMS API) ---
@@ -154,7 +154,7 @@ Resources:
       SubnetId: !Ref NitroPrivateSubnet
       RouteTableId: !Ref NitroPrivateRouteTable
 
-  # KMS interface endpoint — enclave host reaches KMS without public internet path
+  # KMS interface endpoint - enclave host reaches KMS without public internet path
   NitroKmsEndpointSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -188,7 +188,7 @@ Resources:
   NitroEnclaveSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: !Sub Nitro enclave host — VPC-only ingress (${Environment})
+      GroupDescription: !Sub Nitro enclave host - VPC-only ingress (${Environment})
       VpcId: !Ref NitroVpc
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -304,7 +304,7 @@ Outputs:
       Name: !Sub agent-wallet-${Environment}-nitro-private-ip
 
   NitroEnclaveInstanceRoleArn:
-    Description: Instance role ARN — sole IAM principal with kms:Sign on the signing key
+    Description: Instance role ARN - sole IAM principal with kms:Sign on the signing key
     Value: !GetAtt NitroEnclaveInstanceRole.Arn
     Export:
       Name: !Sub agent-wallet-${Environment}-nitro-role-arn
@@ -322,5 +322,5 @@ Outputs:
     Value: !Ref NitroEnclaveSecurityGroup
 
   SigningServicePort:
-    Description: TCP port reserved for the future parent→enclave signing API
+    Description: TCP port reserved for the future parent->enclave signing API
     Value: !Ref SigningServicePort

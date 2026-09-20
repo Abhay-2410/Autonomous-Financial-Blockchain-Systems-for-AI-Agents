@@ -57,7 +57,10 @@ chmod +x build-enclave.sh
 # prints PCR0 and writes pcr0.txt + limitx-enclave-app.eif
 ```
 
-Use **PCR0** in the KMS key policy `kmsnsm:ImagePcors` / attestation condition so only this enclave image can call `kms:Sign`.
+Use **PCR0** in the main stack parameter `EnclaveImageSha384`. That wires
+`kms:RecipientAttestation:ImageSha384` (≡ PCR0) on
+`SignOnlyWithEnclaveImageAttestation` in `infra/template.yaml` so only this
+enclave image can satisfy the Nitro `kms:Sign` allow.
 
 ## Parent checklist
 

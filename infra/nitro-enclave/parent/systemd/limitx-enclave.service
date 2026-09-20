@@ -1,0 +1,23 @@
+[Unit]
+Description=LimitX Nitro Enclave signer (run-enclave)
+Documentation=file:///opt/limitx/parent/start-enclave.sh
+After=network-online.target nitro-enclaves-allocator.service limitx-vsock-proxy.service
+Wants=network-online.target limitx-vsock-proxy.service
+Requires=nitro-enclaves-allocator.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/limitx/enclave.env
+Environment=EIF_PATH=/opt/limitx/enclave/limitx-enclave-app.eif
+Environment=ENCLAVE_CID=16
+Environment=ENCLAVE_CPU_COUNT=2
+Environment=ENCLAVE_MEMORY_MIB=256
+ExecStart=/opt/limitx/parent/start-enclave.sh
+Restart=always
+RestartSec=5
+# run-enclave is long-lived; if it exits, systemd restarts the enclave
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

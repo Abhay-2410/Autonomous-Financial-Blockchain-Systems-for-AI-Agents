@@ -12,12 +12,16 @@ key never leaves AWS KMS, and only one role could call `kms:Sign`.
 
 | Path | Where signing happens | Who may call `kms:Sign` |
 |---|---|---|
-| Hackathon interim (Prompt 7) | Lambda in the main SAM stack | ~~`SignTransactionExecutionRole`~~ **removed** |
-| Production (this stack) | Code inside a Nitro Enclave on EC2 | **Only** `NitroEnclaveInstanceRole` |
+| **`SIGNING_MODE=lambda-kms`** (default) | Lambda in the main SAM stack | `SignTransactionExecutionRole` (demo fallback) |
+| **`SIGNING_MODE=nitro-enclave`** | Code inside a Nitro Enclave on EC2 | Nitro instance role **and** key-policy `kms:RecipientAttestation:ImageSha384` (= PCR0) |
 
-The main SAM template no longer attaches `kms:Sign` / `kms:DescribeKey` to any
-Lambda role. Wire `SignTransactionFunction` (or a thin VPC proxy) to this host
-over the private network; the enclave process is what should invoke KMS.
+**Free Tier:** do **not** deploy this stack. Keep `SigningMode=lambda-kms`.
+
+**Production:** deploy this host, build the EIF (prints PCR0), then redeploy the
+main stack with `SigningMode=nitro-enclave`, `EnclaveParentUrl`,
+`EnclaveImageSha384=<PCR0>`, and `NitroEnclaveInstanceRoleArn`. The main-stack
+key policy Sid **`SignOnlyWithEnclaveImageAttestation`** is the independently
+checkable proof that Sign requires a fresh attestation from that exact image.
 
 ## What is deployed
 
@@ -76,8 +80,14 @@ aws cloudformation describe-stacks `
   --region eu-north-1
 ```
 
-Allocator defaults (`EnclaveCpuCount=2`, `EnclaveMemoryMiB=256`) meet the
-minimum reservation; raise them if your EIF needs more.
+## Free Tier — skip this stack
+
+Nitro Enclaves need **c5.xlarge / m5.xlarge** (or larger). Free Tier-only
+accounts cannot launch those types.
+
+**Do not run `deploy.ps1` / `deploy.sh` on Free Tier.** Use the main stack only
+(`SigningMode=lambda-kms`). Signing stays on the Lambda KMS path; flip to
+`nitro-enclave` later when this host exists.
 
 ## Allocator (user-data)
 
@@ -91,6 +101,44 @@ cpu_count: 2      # minimum
 
 Then enables/restarts `nitro-enclaves-allocator.service`. Do not lower these
 below 2 vCPUs / 256 MiB.
+
+## Parent host (outside the enclave)
+
+→ **[parent/README.md](./parent/README.md)**
+
+- `vsock-proxy.yaml` — allowlist **only** `kms.<region>.amazonaws.com:443`
+- `proxy-service/` — Rust HTTP→vsock bridge (`:8443`) for API Lambdas
+- `start-enclave.sh` + `systemd/` — boot enclave and restart on crash
+
+## One-shot demo setup
+
+> **Do not run `deploy.sh` on Windows.** Nitro Enclaves need the EC2 host from
+> `nitro-enclave.yaml` (Amazon Linux 2023 + `EnclaveOptions`). Windows `sudo`
+> cannot run this.
+
+### On your laptop (PowerShell) — deploy the host only
+
+```powershell
+cd E:\AFBSAA\Autonomous-Financial-Blockchain-Systems-for-AI-Agents\infra\nitro-enclave
+.\deploy.ps1
+```
+
+This uses **AWS CloudFormation only** (no `sudo`, no bash). It prints the
+instance ID / private IP.
+
+Then open a session on the instance and run the Linux `deploy.sh` there
+(see below).
+
+### On the EC2 host (Amazon Linux) — build EIF + start services
+
+```bash
+# After cloning/copying the repo onto the instance:
+cd /path/to/Autonomous-Financial-Blockchain-Systems-for-AI-Agents
+sudo AWS_REGION=eu-north-1 bash infra/nitro-enclave/deploy.sh
+```
+
+That builds the `.eif`, prints **PCR0**, installs systemd units, and starts
+vsock-proxy + enclave + parent HTTP proxy.
 
 ## Enclave application (Rust)
 
@@ -106,9 +154,13 @@ Minimal vsock signer that runs **inside** the enclave image:
 ## Security notes
 
 - Host has **no public IP**; reach it only inside the VPC (or via peering / TGW).
-- Do **not** re-grant `kms:Sign` to Lambda roles in the main stack.
+- After building the EIF, put **PCR0** into the main stack as `EnclaveImageSha384`
+  (condition key `kms:RecipientAttestation:ImageSha384` — see
+  [AWS KMS Nitro condition keys](https://docs.aws.amazon.com/kms/latest/developerguide/conditions-nitro-enclave.html)).
 - Build the EIF with `enclave-app/build-enclave.sh` (prints **PCR0**), run
   `vsock-proxy` on the parent, then `nitro-cli run-enclave`.
+- Live demo: keep `SIGNING_MODE=lambda-kms` as an instant fallback; both signer
+  Lambdas remain deployed.
 
 ## Cost warning
 

@@ -1,0 +1,21 @@
+[Unit]
+Description=LimitX parent HTTP→vsock proxy (API Lambdas → enclave)
+Documentation=file:///opt/limitx/parent/proxy-service
+After=network-online.target limitx-enclave.service
+Wants=limitx-enclave.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/limitx/enclave.env
+Environment=BIND_ADDR=0.0.0.0:8443
+Environment=ENCLAVE_VSOCK_PORT=5000
+Environment=ENCLAVE_CID=16
+Environment=RUST_LOG=limitx_parent_proxy=info
+ExecStart=/usr/local/bin/limitx-parent-proxy
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

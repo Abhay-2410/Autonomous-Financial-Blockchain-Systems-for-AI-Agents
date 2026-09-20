@@ -6,6 +6,6 @@ import { listMerchants } from "../lib/merchants";
  * GET /merchants — payout directory for the Pay screen.
  */
 export const handler: APIGatewayProxyHandlerV2 = async () => {
-  const merchants = listMerchants();
+  const merchants = await listMerchants();
   return json(200, { merchants, count: merchants.length });
 };

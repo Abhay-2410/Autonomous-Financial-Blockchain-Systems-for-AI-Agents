@@ -1,0 +1,38 @@
+[
+  {
+    "id": "demo-headphones",
+    "title": "LimitX Demo Wireless Headphones",
+    "price": 49.99,
+    "currency": "USD",
+    "merchant": "Amazon",
+    "url": "https://www.amazon.com/dp/DEMOHEADPHONES",
+    "tags": ["wireless", "headphones", "audio"]
+  },
+  {
+    "id": "demo-mug",
+    "title": "LimitX Coffee Mug",
+    "price": 14.5,
+    "currency": "USD",
+    "merchant": "Flipkart",
+    "url": "https://www.flipkart.com/demo-mug",
+    "tags": ["coffee", "mug", "kitchen"]
+  },
+  {
+    "id": "demo-keyboard",
+    "title": "Compact USB Keyboard",
+    "price": 29.0,
+    "currency": "USD",
+    "merchant": "Amazon",
+    "url": "https://www.amazon.com/dp/DEMOKEYBOARD",
+    "tags": ["keyboard", "usb", "office"]
+  },
+  {
+    "id": "demo-store-tee",
+    "title": "DemoStore Organic Tee",
+    "price": 22.0,
+    "currency": "USD",
+    "merchant": "DemoStore",
+    "url": "file://demo_store.html#tee",
+    "tags": ["shirt", "tee", "clothing"]
+  }
+]

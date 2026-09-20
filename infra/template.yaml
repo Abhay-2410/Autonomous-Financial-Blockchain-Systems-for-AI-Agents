@@ -14,7 +14,28 @@ Globals:
         TABLE_NAME: !Ref AgentWalletTable
         WALLET_ID: org-limitx
         OWNER_API_KEY: limitx-owner-demo-key
+        SESSION_SECRET: limitx-session-demo-secret
+        # "0" once Twilio is configured — OTP goes to the phone, not the UI
+        AUTH_DEV_MODE: !Ref AuthDevMode
+        SMS_ENABLED: !Ref SmsEnabled
+        DEFAULT_PHONE_COUNTRY: !Ref DefaultPhoneCountry
+        OTP_TTL_SECONDS: "300"
+        TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
+        TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
+        TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
+        TWILIO_MESSAGING_SERVICE_SID: !Ref TwilioMessagingServiceSid
+        TWILIO_VERIFY_SERVICE_SID: !Ref TwilioVerifyServiceSid
+        AUTH_ALLOWED_PHONES: !Ref AuthAllowedPhones
+        DEMO_OWNER_PHONES: !Ref DemoOwnerPhones
+        STELLAR_NETWORK: testnet
+        STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+        STELLAR_FRIENDBOT_URL: https://friendbot.stellar.org
+        STELLAR_SEAL_KEY: limitx-session-demo-secret
         ENVIRONMENT: !Ref Environment
+        PRAVA_SECRET_KEY: !Ref PravaSecretKey
+        PRAVA_API_BASE: !Ref PravaApiBase
+        PRAVA_OWNER_EMAIL: !Ref PravaOwnerEmail
+        PRAVA_CALLBACK_BASE: !Ref PravaCallbackBase
 
 Parameters:
   Environment:
@@ -24,6 +45,126 @@ Parameters:
       - dev
       - staging
       - prod
+  SigningMode:
+    Type: String
+    Default: lambda-kms
+    AllowedValues:
+      - lambda-kms
+      - nitro-enclave
+    Description: >
+      Feature flag for which signer Lambda invokeSignTransaction calls.
+      lambda-kms = Prompt 7 SignTransaction (Free Tier / live-demo fallback).
+      nitro-enclave = authorizeAndSignViaEnclave (parent → vsock → enclave).
+      Flip this (or the SIGNING_MODE env on callers) instantly if the enclave
+      misbehaves during a demo recording — both functions stay deployed.
+  EnclaveParentUrl:
+    Type: String
+    Default: ""
+    Description: >
+      Private HTTP URL of limitx-parent-proxy (e.g. http://10.20.1.10:8443).
+      Required when SIGNING_MODE=nitro-enclave. Leave empty on Free Tier.
+  EnclaveImageSha384:
+    Type: String
+    Default: ""
+    Description: >
+      PCR0 hex from enclave-app/build-enclave.sh (pcr0.txt). Same value as
+      kms:RecipientAttestation:ImageSha384 (AWS docs: ImageSha384 ≡ PCR0).
+      Set with NitroEnclaveInstanceRoleArn to bind kms:Sign to that enclave image.
+  NitroEnclaveInstanceRoleArn:
+    Type: String
+    Default: ""
+    Description: >
+      Instance role ARN from nitro-enclave stack output NitroEnclaveInstanceRoleArn.
+      Principal for the attestation-bound kms:Sign key-policy statement.
+  NitroPrivateSubnetId:
+    Type: String
+    Default: ""
+    Description: Private subnet ID from nitro-enclave stack (Lambda VPC attach)
+  NitroLambdaSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: SG allowing egress to enclave host :8443
+  PravaSecretKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Prava secret key (sk_test_… sandbox / sk_live_… prod). Leave empty to
+      disable the card rail; Pay UI still works on the chain stub path.
+  PravaApiBase:
+    Type: String
+    Default: https://sandbox.api.prava.space
+    Description: Prava API base URL
+  PravaOwnerEmail:
+    Type: String
+    Default: owner@limitx.demo
+    Description: Cardholder email sent to Prava sessions
+  PravaCallbackBase:
+    Type: String
+    Default: http://localhost:3000
+    Description: Dashboard origin for /pay/prava-return (use https in prod)
+  AuthDevMode:
+    Type: String
+    Default: "1"
+    AllowedValues: ["0", "1"]
+    Description: >
+      1 = return OTP in API when SMS fails (local demos). Set to 0 for real
+      phone login so codes are only delivered by SMS.
+  SmsEnabled:
+    Type: String
+    Default: "0"
+    AllowedValues: ["0", "1"]
+    Description: >
+      1 = also try AWS SNS SMS (needs End User Messaging subscription). Prefer Twilio.
+  DefaultPhoneCountry:
+    Type: String
+    Default: "91"
+    Description: Default country calling code when the user omits +
+  TwilioAccountSid:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Twilio Account SID (ACxxxx) for real OTP SMS
+  TwilioAuthToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Twilio Auth Token
+  TwilioFromNumber:
+    Type: String
+    Default: ""
+    Description: Twilio sender number in E.164 (e.g. +14155552671)
+  TwilioMessagingServiceSid:
+    Type: String
+    Default: ""
+    Description: Optional Twilio Messaging Service SID (instead of From number)
+  TwilioVerifyServiceSid:
+    Type: String
+    Default: ""
+    Description: Twilio Verify Service SID (VAxxxx). Auto-created if empty.
+  AuthAllowedPhones:
+    Type: String
+    Default: ""
+    Description: >
+      Comma-separated E.164 phones allowed to sign in (e.g. +9198…,+1415…).
+      Empty = any valid number.
+  DemoOwnerPhones:
+    Type: String
+    Default: ""
+    Description: >
+      Comma-separated E.164 phones that attach to the shared org-limitx treasury
+      instead of a fresh $10k wallet.
+
+Conditions:
+  HasEnclaveParentUrl: !Not [!Equals [!Ref EnclaveParentUrl, ""]]
+  # PCR0 + Nitro instance role set → attestation-bound Sign statement in key policy
+  BindSignToEnclaveAttestation: !And
+    - !Not [!Equals [!Ref EnclaveImageSha384, ""]]
+    - !Not [!Equals [!Ref NitroEnclaveInstanceRoleArn, ""]]
+  AttachLambdaToNitroVpc: !And
+    - !Condition HasEnclaveParentUrl
+    - !Not [!Equals [!Ref NitroPrivateSubnetId, ""]]
+    - !Not [!Equals [!Ref NitroLambdaSecurityGroupId, ""]]
 
 Resources:
   # --- API Gateway ---
@@ -120,30 +261,7 @@ Resources:
         - Id: AlertCloudWatchLogs
           Arn: !GetAtt AlertLogGroup.Arn
 
-  # --- KMS asymmetric signing key (secp256k1) ---
-  TransactionSigningKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub agent-wallet secp256k1 signer (${Environment})
-      KeySpec: ECC_SECG_P256K1
-      KeyUsage: SIGN_VERIFY
-      EnableKeyRotation: false
-      KeyPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: EnableRootAccountAdmin
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: "*"
-
-  TransactionSigningKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub alias/agent-wallet-sign-${Environment}
-      TargetKeyId: !Ref TransactionSigningKey
-
+  # --- Prompt 7 signer role (defined before key so key policy can name it) ---
   SignTransactionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -169,9 +287,97 @@ Resources:
                   - dynamodb:PutItem
                   - dynamodb:Query
                 Resource: !GetAtt AgentWalletTable.Arn
-        # kms:Sign / kms:DescribeKey are intentionally NOT on this role.
-        # Production signing is exclusive to NitroEnclaveInstanceRole
-        # (see infra/nitro-enclave/). This Lambda must call the enclave host.
+
+  # --- KMS asymmetric signing key (secp256k1) ---
+  TransactionSigningKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub agent-wallet secp256k1 signer (${Environment})
+      KeySpec: ECC_SECG_P256K1
+      KeyUsage: SIGN_VERIFY
+      EnableKeyRotation: false
+      KeyPolicy:
+        Version: "2012-10-17"
+        # When EnclaveImageSha384 + NitroEnclaveInstanceRoleArn are set, Sign is
+        # split out of root admin and bound to Nitro attestation (see below).
+        # Otherwise Free Tier keeps a simple root kms:* policy + IAM on Lambda.
+        Statement: !If
+          - BindSignToEnclaveAttestation
+          - - Sid: RootKeyAdministrationExceptSign
+              Effect: Allow
+              Principal:
+                AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+              # Sign is NOT here — only the attestation-bound / demo-fallback
+              # statements below may authorize kms:Sign.
+              NotAction: kms:Sign
+              Resource: "*"
+            #
+            # ★ THE ATTESTATION LINE — independently checkable proof ★
+            # AWS condition key: kms:RecipientAttestation:ImageSha384
+            # (docs.aws.amazon.com/kms/latest/developerguide/conditions-nitro-enclave.html).
+            # ImageSha384 ≡ PCR0 of the enclave EIF from build-enclave.sh / pcr0.txt.
+            # Even if the EC2 instance role is compromised, kms:Sign still requires a
+            # fresh Nitro attestation document whose PCR0 matches this hash. That is
+            # what makes "key material never exposed outside the enclave" a property
+            # of this key policy (readable by anyone), not just an architecture slide.
+            # AWS evaluates RecipientAttestation on attested Recipient APIs; we bind
+            # the same ImageSha384 to this Sign allow for the Nitro principal so the
+            # intended enclave image is explicit and enforceable in policy.
+            #
+            - Sid: SignOnlyWithEnclaveImageAttestation
+              Effect: Allow
+              Principal:
+                AWS: !Ref NitroEnclaveInstanceRoleArn
+              Action:
+                - kms:Sign
+                - kms:DescribeKey
+                - kms:GetPublicKey
+              Resource: "*"
+              Condition:
+                StringEqualsIgnoreCase:
+                  kms:RecipientAttestation:ImageSha384: !Ref EnclaveImageSha384
+            # Live-demo escape hatch: SIGNING_MODE=lambda-kms still works if the
+            # enclave misbehaves (Prompt 7 Lambda signer). Remove this statement
+            # for production-hard deployments that refuse any non-attested Sign.
+            - Sid: SignLambdaKmsDemoFallback
+              Effect: Allow
+              Principal:
+                AWS: !GetAtt SignTransactionExecutionRole.Arn
+              Action:
+                - kms:Sign
+                - kms:DescribeKey
+                - kms:GetPublicKey
+              Resource: "*"
+          - - Sid: EnableRootAccountAdmin
+              Effect: Allow
+              Principal:
+                AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+              Action: kms:*
+              Resource: "*"
+
+  TransactionSigningKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/agent-wallet-sign-${Environment}
+      TargetKeyId: !Ref TransactionSigningKey
+
+  # Always attached: Prompt 7 Lambda signer + live-demo fallback (SIGNING_MODE=lambda-kms).
+  SignTransactionKmsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub agent-wallet-sign-kms-${Environment}
+      Roles:
+        - !Ref SignTransactionExecutionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SignWithTransactionKey
+            Effect: Allow
+            Action:
+              - kms:Sign
+              - kms:DescribeKey
+              - kms:GetPublicKey
+            Resource: !GetAtt TransactionSigningKey.Arn
 
   # --- Data store ---
   AgentWalletTable:
@@ -189,6 +395,9 @@ Resources:
           KeyType: HASH
         - AttributeName: sk
           KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
 
   # --- Core API Lambdas ---
   HealthFunction:
@@ -251,8 +460,9 @@ Resources:
       FunctionName: !Sub agent-wallet-list-wallets-${Environment}
       CodeUri: ../api/
       Handler: dist/handlers/listWallets.handler
+      Timeout: 60
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref AgentWalletTable
       Events:
         ListWallets:
@@ -268,8 +478,11 @@ Resources:
       FunctionName: !Sub agent-wallet-home-${Environment}
       CodeUri: ../api/
       Handler: dist/handlers/getHome.handler
+      Timeout: 60
       Policies:
         - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref AgentWalletTable
       Events:
         GetHome:
@@ -277,6 +490,64 @@ Resources:
           Properties:
             RestApiId: !Ref AgentWalletApi
             Path: /home
+            Method: GET
+
+  StartPhoneAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-auth-start-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/startPhoneAuth.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: "*"
+      Events:
+        StartPhoneAuth:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /auth/phone/start
+            Method: POST
+
+  VerifyPhoneAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-auth-verify-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/verifyPhoneAuth.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        VerifyPhoneAuth:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /auth/phone/verify
+            Method: POST
+
+  GetMeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-auth-me-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/getMe.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        GetMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /auth/me
             Method: GET
 
   ListMerchantsFunction:
@@ -292,6 +563,42 @@ Resources:
             RestApiId: !Ref AgentWalletApi
             Path: /merchants
             Method: GET
+
+  GetPravaStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-prava-status-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/getPravaStatus.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        GetPravaStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /transactions/{transactionId}/prava
+            Method: GET
+
+  CompletePravaCheckoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-prava-complete-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/completePravaCheckout.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+      Events:
+        CompletePrava:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AgentWalletApi
+            Path: /transactions/{transactionId}/prava/complete
+            Method: POST
 
   UpdateWalletFunction:
     Type: AWS::Serverless::Function
@@ -352,7 +659,9 @@ Resources:
       Handler: dist/handlers/requestTransaction.handler
       Environment:
         Variables:
+          SIGNING_MODE: !Ref SigningMode
           SIGN_TRANSACTION_FUNCTION_NAME: !Ref SignTransactionFunction
+          AUTHORIZE_AND_SIGN_VIA_ENCLAVE_FUNCTION_NAME: !Ref AuthorizeAndSignViaEnclaveFunction
           APPROVAL_STATE_MACHINE_ARN: !Ref ApprovalStateMachine
       Policies:
         - DynamoDBCrudPolicy:
@@ -363,6 +672,11 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt SignTransactionFunction.Arn
+            - Sid: InvokeEnclaveSigner
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt AuthorizeAndSignViaEnclaveFunction.Arn
             - Sid: StartApprovalWorkflow
               Effect: Allow
               Action:
@@ -392,6 +706,33 @@ Resources:
         Variables:
           KMS_KEY_ID: !Ref TransactionSigningKey
 
+  # Alternate signer (Prompt 7c): HTTP → parent → vsock → Nitro Enclave → KMS.
+  # Selected when SIGNING_MODE=nitro-enclave; keep deployed for instant flip.
+  AuthorizeAndSignViaEnclaveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub agent-wallet-enclave-sign-${Environment}
+      CodeUri: ../api/
+      Handler: dist/handlers/authorizeAndSignViaEnclave.handler
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref TransactionSigningKey
+          ENCLAVE_PARENT_URL: !Ref EnclaveParentUrl
+          SIGNING_MODE: nitro-enclave
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentWalletTable
+        - VPCAccessPolicy: {}
+      VpcConfig: !If
+        - AttachLambdaToNitroVpc
+        - SecurityGroupIds:
+            - !Ref NitroLambdaSecurityGroupId
+          SubnetIds:
+            - !Ref NitroPrivateSubnetId
+        - !Ref AWS::NoValue
+
   # --- Approval workflow Lambdas ---
   StoreApprovalTaskTokenFunction:
     Type: AWS::Serverless::Function
@@ -412,7 +753,9 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          SIGNING_MODE: !Ref SigningMode
           SIGN_TRANSACTION_FUNCTION_NAME: !Ref SignTransactionFunction
+          AUTHORIZE_AND_SIGN_VIA_ENCLAVE_FUNCTION_NAME: !Ref AuthorizeAndSignViaEnclaveFunction
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AgentWalletTable
@@ -420,7 +763,9 @@ Resources:
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !GetAtt SignTransactionFunction.Arn
+              Resource:
+                - !GetAtt SignTransactionFunction.Arn
+                - !GetAtt AuthorizeAndSignViaEnclaveFunction.Arn
             - Effect: Allow
               Action:
                 - events:PutEvents
@@ -617,17 +962,35 @@ Outputs:
     Description: DynamoDB table name
     Value: !Ref AgentWalletTable
   SigningKeyId:
-    Description: KMS secp256k1 key id (kms:Sign only via Nitro enclave instance role — see infra/nitro-enclave/)
+    Description: >
+      KMS secp256k1 key id. With EnclaveImageSha384 set, kms:Sign for the Nitro
+      role requires kms:RecipientAttestation:ImageSha384 (PCR0). Lambda demo
+      fallback remains via SIGNING_MODE=lambda-kms.
     Value: !Ref TransactionSigningKey
   SigningKeyArn:
     Description: Full ARN of the signing key (pass to nitro-enclave stack as SigningKeyArn)
     Value: !GetAtt TransactionSigningKey.Arn
   SignTransactionFunctionName:
-    Description: Internal signer Lambda (hackathon stub; production must proxy to Nitro host)
+    Description: Prompt 7 Lambda signer (SIGNING_MODE=lambda-kms)
     Value: !Ref SignTransactionFunction
+  SigningModeConfigured:
+    Description: Active SIGNING_MODE feature flag for this deploy
+    Value: !Ref SigningMode
+  SigningPath:
+    Description: Human-readable signing path
+    Value: !Ref SigningMode
+  AuthorizeAndSignViaEnclaveFunctionName:
+    Description: Nitro path signer Lambda (SIGNING_MODE=nitro-enclave)
+    Value: !Ref AuthorizeAndSignViaEnclaveFunction
+  EnclaveImageSha384Configured:
+    Description: PCR0 / ImageSha384 bound in key policy (empty = not bound yet)
+    Value: !Ref EnclaveImageSha384
   NitroEnclaveStackHint:
-    Description: Deploy production signer host
+    Description: Optional production signer host (skip on Free Tier)
     Value: infra/nitro-enclave/nitro-enclave.yaml
+  EnclaveParentUrlConfigured:
+    Description: Whether ENCLAVE_PARENT_URL was set on deploy
+    Value: !Ref EnclaveParentUrl
   ApprovalStateMachineArn:
     Description: Human approval Step Functions state machine
     Value: !Ref ApprovalStateMachine

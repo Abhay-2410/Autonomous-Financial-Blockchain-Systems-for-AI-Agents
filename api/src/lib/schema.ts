@@ -9,6 +9,9 @@
  *   Policy        PK=AGENT#<agentId>     SK=POLICY#<version>
  *   Transaction   PK=AGENT#<agentId>     SK=TXN#<timestamp>#<txnId>
  *   AuditEvent    PK=AGENT#<agentId>     SK=AUDIT#<timestamp>
+ *   User          PK=USER#<userId>       SK=META
+ *   PhoneIndex    PK=PHONE#<e164>        SK=USER
+ *   PhoneOtp      PK=OTP#<e164>          SK=CODE   (TTL via expiresAt)
  */
 
 export type AgentStatus = "ACTIVE" | "REVOKED";
@@ -26,7 +29,10 @@ export type EntityType =
   | "AgentWallet"
   | "Policy"
   | "Transaction"
-  | "AuditEvent";
+  | "AuditEvent"
+  | "User"
+  | "PhoneIndex"
+  | "PhoneOtp";
 
 /** Base item shape stored in DynamoDB. */
 export interface DynamoKeys {
@@ -41,8 +47,10 @@ export interface ParentWallet extends DynamoKeys {
   createdAt: string; // ISO-8601
   /** Treasury balance shown in the payments home (demo units ≈ USD). */
   balance?: number;
-  /** On-chain treasury address (demo identity). */
+  /** On-chain treasury address (Stellar G… or demo 0x…). */
   address?: string;
+  /** AES-GCM sealed Stellar secret (S…) for custodial signing. */
+  stellarSecretEnc?: string;
   chainId?: number;
   tokenSymbol?: string;
   chainName?: string;
@@ -68,8 +76,10 @@ export interface AgentWallet extends DynamoKeys {
   permittedTransactionTypes?: string[];
   /** Total allocated balance for the period; defaults to dailyLimit. */
   allocatedBalance?: number;
-  /** Agent prepaid card / on-chain address (demo identity). */
+  /** Agent prepaid card / Stellar G… or demo 0x address. */
   address?: string;
+  /** AES-GCM sealed Stellar secret (S…) for custodial signing. */
+  stellarSecretEnc?: string;
   chainId?: number;
   tokenSymbol?: string;
   chainName?: string;
@@ -112,6 +122,13 @@ export interface Transaction extends DynamoKeys {
   toAddress?: string;
   explorerUrl?: string;
   tokenSymbol?: string;
+  /** Settlement path: on-chain stub vs Prava card rail. */
+  settlementRail?: "chain" | "prava" | "stellar";
+  pravaSessionId?: string;
+  pravaOrderId?: string | null;
+  pravaIframeUrl?: string;
+  pravaStatus?: string;
+  pravaExpiresAt?: string;
   /** Step Functions waitForTaskToken token (human approval). */
   approvalTaskToken?: string;
   approvalExecutionArn?: string;
@@ -125,12 +142,44 @@ export interface AuditEvent extends DynamoKeys {
   details: Record<string, unknown>;
 }
 
+/** Phone-authenticated LimitX account (payments-app style). */
+export interface User extends DynamoKeys {
+  entityType: "User";
+  userId: string;
+  phone: string; // E.164
+  walletId: string;
+  displayName?: string;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
+/** Reverse lookup phone → userId (one row per phone). */
+export interface PhoneIndex extends DynamoKeys {
+  entityType: "PhoneIndex";
+  phone: string;
+  userId: string;
+}
+
+/** Short-lived SMS/dev OTP. DynamoDB TTL on expiresAt (epoch seconds). */
+export interface PhoneOtp extends DynamoKeys {
+  entityType: "PhoneOtp";
+  phone: string;
+  codeHash: string;
+  attempts: number;
+  createdAt: string;
+  /** Epoch seconds — DynamoDB TTL attribute */
+  expiresAt: number;
+}
+
 export type AgentWalletItem =
   | ParentWallet
   | AgentWallet
   | Policy
   | Transaction
-  | AuditEvent;
+  | AuditEvent
+  | User
+  | PhoneIndex
+  | PhoneOtp;
 
 // --- Key builders ---
 
@@ -162,6 +211,21 @@ export const Keys = {
   auditEvent: (agentId: string, timestamp: string): DynamoKeys => ({
     pk: `AGENT#${agentId}`,
     sk: `AUDIT#${timestamp}`,
+  }),
+
+  user: (userId: string): DynamoKeys => ({
+    pk: `USER#${userId}`,
+    sk: "META",
+  }),
+
+  phoneIndex: (phoneE164: string): DynamoKeys => ({
+    pk: `PHONE#${phoneE164}`,
+    sk: "USER",
+  }),
+
+  phoneOtp: (phoneE164: string): DynamoKeys => ({
+    pk: `OTP#${phoneE164}`,
+    sk: "CODE",
   }),
 } as const;
 
@@ -221,6 +285,36 @@ export function buildAuditEvent(
   return {
     ...Keys.auditEvent(input.agentId, input.timestamp),
     entityType: "AuditEvent",
+    ...input,
+  };
+}
+
+export function buildUser(
+  input: Omit<User, "pk" | "sk" | "entityType">
+): User {
+  return {
+    ...Keys.user(input.userId),
+    entityType: "User",
+    ...input,
+  };
+}
+
+export function buildPhoneIndex(
+  input: Omit<PhoneIndex, "pk" | "sk" | "entityType">
+): PhoneIndex {
+  return {
+    ...Keys.phoneIndex(input.phone),
+    entityType: "PhoneIndex",
+    ...input,
+  };
+}
+
+export function buildPhoneOtp(
+  input: Omit<PhoneOtp, "pk" | "sk" | "entityType">
+): PhoneOtp {
+  return {
+    ...Keys.phoneOtp(input.phone),
+    entityType: "PhoneOtp",
     ...input,
   };
 }
